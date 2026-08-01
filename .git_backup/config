@@ -1,0 +1,11 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+[user]
+	name = rhadsofttech
+	email = rhadsofttech@gmail.com
+[remote "origin"]
+	url = https://github.com/rhadsofttech-arch/ikdsquare.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
