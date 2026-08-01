@@ -5,6 +5,7 @@ import { EmailVerificationBanner } from './components/EmailVerificationBanner';
 import { Footer } from './components/Footer';
 import { ToastContainer } from './components/ToastContainer';
 import { StoreSetupModal } from './components/StoreSetupModal';
+import { BottomNav } from './components/BottomNav';
 import { HomePage } from './pages/HomePage';
 import { AuthPage } from './pages/AuthPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
@@ -18,7 +19,7 @@ const MainLayout: React.FC = () => {
   const { currentPage } = useApp();
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 font-sans antialiased selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen flex flex-col bg-slate-50 font-sans antialiased selection:bg-emerald-500 selection:text-white pb-16 md:pb-0">
       <Header />
       <EmailVerificationBanner />
 
@@ -34,6 +35,7 @@ const MainLayout: React.FC = () => {
       </main>
 
       <Footer />
+      <BottomNav />
       <ToastContainer />
       <StoreSetupModal />
     </div>
