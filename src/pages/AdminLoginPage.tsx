@@ -247,7 +247,7 @@ export const AdminLoginPage: React.FC = () => {
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-                  Authenticating Administrator...
+                  Signing in Administrator...
                 </>
               ) : (
                 <>
@@ -310,7 +310,7 @@ export const AdminLoginPage: React.FC = () => {
               ) : (
                 <form onSubmit={handleSendResetLink} className="space-y-4">
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Enter the administrator email address below. We'll send a password recovery link via Supabase Auth.
+                    Enter the administrator email address below. We'll send a password recovery link to your email.
                   </p>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">

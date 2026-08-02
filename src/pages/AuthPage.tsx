@@ -7,7 +7,8 @@ import {
   signUpWithEmailPassword,
   loginWithEmailPassword,
   resendSupabaseVerificationEmail,
-  checkSupabaseEmailVerified
+  checkSupabaseEmailVerified,
+  isSupabaseConfigured
 } from '../services/supabase';
 import { ALL_IKORODU_AREAS, CATEGORY_GROUPS, ALL_SUBCATEGORIES } from '../data/ikoroduData';
 import { User, Vendor } from '../types';
@@ -27,12 +28,29 @@ import {
   ListChecks,
   Mail,
   Loader2,
+  Eye,
+  EyeOff,
+  Shield,
 } from 'lucide-react';
 
 export const AuthPage: React.FC = () => {
   const { setCurrentUser, setCurrentPage, showToast, refreshData } = useApp();
 
-  const [authTab, setAuthTab] = useState<'signin' | 'register'>('register');
+  const [authTab, setAuthTab] = useState<'signin' | 'register'>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      if (hash.includes('register') || search.includes('register') || search.includes('mode=register')) {
+        return 'register';
+      }
+    }
+    return 'signin';
+  });
+
+  // Password visibility states
+  const [showSignInPassword, setShowSignInPassword] = useState(false);
+  const [showCustPassword, setShowCustPassword] = useState(false);
+  const [showVendorPassword, setShowVendorPassword] = useState(false);
 
   // Sign in state
   const [signInMode, setSignInMode] = useState<'phone' | 'email'>('phone');
@@ -167,10 +185,10 @@ export const AuthPage: React.FC = () => {
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
-      showToast('info', 'Redirecting to Google', 'Connecting to Supabase Google Auth...');
+      showToast('info', 'Redirecting to Google', 'Connecting to Google Authentication...');
     } catch (err) {
       console.error('Google Auth Failed:', err);
-      showToast('error', 'Google Auth Error', 'Could not complete Google Sign-In with Supabase.');
+      showToast('error', 'Google Auth Error', 'Could not complete Google Sign-In.');
     }
   };
 
@@ -219,7 +237,14 @@ export const AuthPage: React.FC = () => {
             setCurrentPage('home');
           }
         } catch (err: any) {
-          console.warn('Supabase Login Note, checking stored accounts:', err);
+          if (isSupabaseConfigured()) {
+            console.error('Sign In Error:', err);
+            const msg = err.message || 'Invalid email address or password. Please try again.';
+            showToast('error', 'Sign In Failed', msg);
+            setIsSigningIn(false);
+            return;
+          }
+
           const vendors = StorageManager.getVendors();
           const matchingVendor = vendors.find(
             (v) => v.email?.toLowerCase() === signInEmail.toLowerCase()
@@ -348,13 +373,13 @@ export const AuthPage: React.FC = () => {
             if (loggedInUser) {
               supaUid = loggedInUser.id;
               isEmailVerifiedInSupabase = loggedInUser.emailVerified || isEmailVerifiedInSupabase;
-              showToast('info', 'Supabase Auth Connected', 'Existing account detected and authenticated.');
+              showToast('info', 'Account Connected', 'Existing account detected and authenticated.');
             }
           } catch (loginErr: any) {
-            showToast('error', 'Email Registered', 'This email is already registered in Supabase. Please sign in instead.');
+            showToast('error', 'Email Registered', 'This email is already registered. Please sign in instead.');
           }
         } else {
-          showToast('info', 'Registration Complete', `Account registered with Supabase Auth.`);
+          showToast('info', 'Registration Complete', `Your account has been registered successfully.`);
         }
       }
 
@@ -555,14 +580,24 @@ export const AuthPage: React.FC = () => {
                     Forgot Password?
                   </button>
                 </div>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  value={signInPassword}
-                  onChange={(e) => setSignInPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-orange-500 outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type={showSignInPassword ? 'text' : 'password'}
+                    required
+                    placeholder="••••••••"
+                    value={signInPassword}
+                    onChange={(e) => setSignInPassword(e.target.value)}
+                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSignInPassword(!showSignInPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                    title={showSignInPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showSignInPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <button
@@ -573,7 +608,7 @@ export const AuthPage: React.FC = () => {
                 {isSigningIn ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Authenticating with Supabase...
+                    Signing you in...
                   </>
                 ) : (
                   'Sign In to Account'
@@ -614,6 +649,18 @@ export const AuthPage: React.FC = () => {
                 </svg>
                 <span>Continue with Google</span>
               </button>
+
+              {/* Administrator Direct Access Portal */}
+              <div className="pt-4 border-t border-slate-100 flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage('admin')}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold py-2.5 px-4 rounded-xl transition text-xs flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Shield className="w-4 h-4 text-amber-400" />
+                  <span>Are you an Administrator? Access Admin Portal</span>
+                </button>
+              </div>
             </form>
           )}
 
@@ -760,14 +807,24 @@ export const AuthPage: React.FC = () => {
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
-                        <input
-                          type="password"
-                          required
-                          placeholder="••••••••"
-                          value={custPassword}
-                          onChange={(e) => setCustPassword(e.target.value)}
-                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
+                        <div className="relative">
+                          <input
+                            type={showCustPassword ? 'text' : 'password'}
+                            required
+                            placeholder="••••••••"
+                            value={custPassword}
+                            onChange={(e) => setCustPassword(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCustPassword(!showCustPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                            title={showCustPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showCustPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
                     </>
                   ) : (
@@ -936,14 +993,24 @@ export const AuthPage: React.FC = () => {
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
-                        <input
-                          type="password"
-                          required
-                          placeholder="••••••••"
-                          value={vendorPassword}
-                          onChange={(e) => setVendorPassword(e.target.value)}
-                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
+                        <div className="relative">
+                          <input
+                            type={showVendorPassword ? 'text' : 'password'}
+                            required
+                            placeholder="••••••••"
+                            value={vendorPassword}
+                            onChange={(e) => setVendorPassword(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowVendorPassword(!showVendorPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                            title={showVendorPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showVendorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
                     </>
                   )}
@@ -1063,7 +1130,7 @@ export const AuthPage: React.FC = () => {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        Creating Account via Supabase Auth...
+                        Creating your account...
                       </>
                     ) : (
                       <>
