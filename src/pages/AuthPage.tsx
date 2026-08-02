@@ -30,7 +30,6 @@ import {
   Loader2,
   Eye,
   EyeOff,
-  Shield,
 } from 'lucide-react';
 
 export const AuthPage: React.FC = () => {
@@ -649,18 +648,6 @@ export const AuthPage: React.FC = () => {
                 </svg>
                 <span>Continue with Google</span>
               </button>
-
-              {/* Administrator Direct Access Portal */}
-              <div className="pt-4 border-t border-slate-100 flex flex-col items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage('admin')}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold py-2.5 px-4 rounded-xl transition text-xs flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <Shield className="w-4 h-4 text-amber-400" />
-                  <span>Are you an Administrator? Access Admin Portal</span>
-                </button>
-              </div>
             </form>
           )}
 
