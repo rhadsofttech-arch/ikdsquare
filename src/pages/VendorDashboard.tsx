@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { StorageManager } from '../data/mockStorage';
 import { ApiService } from '../services/api';
@@ -250,6 +250,29 @@ export const VendorDashboard: React.FC = () => {
     showToast('success', 'Store Profile Updated!', 'Your business profile, pictures, address and description have been updated.');
   };
 
+  // Get vendor specific data
+  const myProducts = useMemo(() => activeVendor ? products.filter((p) => p.vendorId === activeVendor.id) : [], [products, activeVendor]);
+  const myReviews = useMemo(() => activeVendor ? reviews.filter((r) => r.vendorId === activeVendor.id) : [], [reviews, activeVendor]);
+  const myEnquiries = useMemo(() => activeVendor ? StorageManager.getEnquiries(activeVendor.id) : [], [activeVendor, products]);
+  const unreadEnquiries = useMemo(() => myEnquiries.filter((e) => !e.read).length, [myEnquiries]);
+
+  // Filtered enquiries for tab
+  const filteredEnquiries = useMemo(() => {
+    return myEnquiries.filter((enq) => {
+      if (enquiryFilter === 'unread' && enq.read) return false;
+      if (enquiryFilter === 'replied' && !enq.replyText) return false;
+      if (enquirySearch.trim()) {
+        const q = enquirySearch.toLowerCase();
+        const matchName = enq.customerName.toLowerCase().includes(q);
+        const matchPhone = enq.customerPhone.includes(q);
+        const matchMsg = enq.message.toLowerCase().includes(q);
+        const matchProduct = enq.productName?.toLowerCase().includes(q);
+        return matchName || matchPhone || matchMsg || matchProduct;
+      }
+      return true;
+    });
+  }, [myEnquiries, enquiryFilter, enquirySearch]);
+
   if (!currentUser || currentUser.role !== 'vendor' || !activeVendor) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -267,27 +290,6 @@ export const VendorDashboard: React.FC = () => {
       </div>
     );
   }
-
-  // Get vendor specific data
-  const myProducts = products.filter((p) => p.vendorId === activeVendor.id);
-  const myReviews = reviews.filter((r) => r.vendorId === activeVendor.id);
-  const myEnquiries = StorageManager.getEnquiries(activeVendor.id);
-  const unreadEnquiries = myEnquiries.filter((e) => !e.read).length;
-
-  // Filtered enquiries for tab
-  const filteredEnquiries = myEnquiries.filter((enq) => {
-    if (enquiryFilter === 'unread' && enq.read) return false;
-    if (enquiryFilter === 'replied' && !enq.replyText) return false;
-    if (enquirySearch.trim()) {
-      const q = enquirySearch.toLowerCase();
-      const matchName = enq.customerName.toLowerCase().includes(q);
-      const matchPhone = enq.customerPhone.includes(q);
-      const matchMsg = enq.message.toLowerCase().includes(q);
-      const matchProduct = enq.productName?.toLowerCase().includes(q);
-      return matchName || matchPhone || matchMsg || matchProduct;
-    }
-    return true;
-  });
 
   const handleMarkEnquiryRead = (enqId: string) => {
     StorageManager.markEnquiryRead(enqId);
@@ -2003,8 +2005,8 @@ export const VendorDashboard: React.FC = () => {
                             {isPending && (
                               <button
                                 onClick={() => {
-                                  const cleanNum = (adminSettings?.whatsappSupportNumber || '2348031234567').replace(/\D/g, '').replace(/^0/, '234');
-                                  const msg = `Hello IkoroduSquare,\n\nI have made payment for a promotional package.\n\nBusiness Name:\n${promo.vendorName}\n\nPromotion:\n${promo.promotionName}\n\nAmount:\n₦${promo.amount.toLocaleString()}\n\nKindly verify my payment and activate my promotion.\n\nThank you.`;
+                                  const cleanNum = (adminSettings?.whatsappSupportNumber || '08156655091').replace(/\D/g, '').replace(/^0/, '234');
+                                  const msg = `Hello IkoroduSquare,\n\nI have made payment for a promotional package.\n\nBusiness Name:\n${promo.vendorName}\n\nPromotion Package:\n${promo.promotionName}\n\nAmount Paid:\n₦${promo.amount.toLocaleString()}\n\nPayment Reference:\n${promo.reference}\n\nKindly verify my payment and activate my promotion.\n\nThank you.`;
                                   window.open(`https://wa.me/${cleanNum}?text=${encodeURIComponent(msg)}`, '_blank');
                                 }}
                                 className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"

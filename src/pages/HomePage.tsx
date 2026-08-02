@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { IKORODU_ZONES, ALL_IKORODU_AREAS, CATEGORY_GROUPS, ALL_SUBCATEGORIES, PROMOTION_PACKAGES } from '../data/ikoroduData';
 import { Vendor, PromotionPackageInfo } from '../types';
@@ -34,6 +34,7 @@ export const HomePage: React.FC = () => {
     vendors,
     products,
     banners,
+    promotions,
     currentUser,
     setCurrentPage,
     setShowSetupModal,
@@ -77,6 +78,7 @@ export const HomePage: React.FC = () => {
   const [isGridLoading, setIsGridLoading] = useState<boolean>(true);
   const [nearMeActive, setNearMeActive] = useState<boolean>(false);
   const [nearMeLoading, setNearMeLoading] = useState<boolean>(false);
+  const [vendorTab, setVendorTab] = useState<'featured' | 'all'>('featured');
 
   // Search History State (Local Storage)
   const SEARCH_HISTORY_KEY = 'ikorodusquare_search_history';
@@ -181,46 +183,72 @@ export const HomePage: React.FC = () => {
   }, [searchQuery, selectedCategory, selectedArea, searchType]);
 
   // Filter vendors based on active search controls (Keyword Search by Business Name, Category, SubCategory, Description, or Neighborhood Area)
-  const filteredVendors = vendors.filter((v) => {
-    if (v.status !== 'approved' || !v.isLive) return false;
+  const filteredVendors = useMemo(() => {
+    return vendors.filter((v) => {
+      if (v.status !== 'approved' || !v.isLive) return false;
 
-    const matchesType = searchType === 'business';
-    const query = searchQuery.trim().toLowerCase();
+      const matchesType = searchType === 'business';
+      const query = searchQuery.trim().toLowerCase();
 
-    const matchesQuery =
-      !query ||
-      v.businessName.toLowerCase().includes(query) ||
-      v.category.toLowerCase().includes(query) ||
-      v.subCategory.toLowerCase().includes(query) ||
-      v.description.toLowerCase().includes(query) ||
-      v.area.toLowerCase().includes(query);
+      const matchesQuery =
+        !query ||
+        v.businessName.toLowerCase().includes(query) ||
+        v.category.toLowerCase().includes(query) ||
+        v.subCategory.toLowerCase().includes(query) ||
+        v.description.toLowerCase().includes(query) ||
+        v.area.toLowerCase().includes(query);
 
-    const matchesCat = selectedCategory === 'All' || v.subCategory === selectedCategory || v.category === selectedCategory;
-    const matchesArea = selectedArea === 'All' || v.area === selectedArea;
+      const matchesCat = selectedCategory === 'All' || v.subCategory === selectedCategory || v.category === selectedCategory;
+      const matchesArea = selectedArea === 'All' || v.area === selectedArea;
 
-    return (searchType === 'business' ? matchesType : true) && matchesQuery && matchesCat && matchesArea;
-  });
+      return (searchType === 'business' ? matchesType : true) && matchesQuery && matchesCat && matchesArea;
+    });
+  }, [vendors, searchType, searchQuery, selectedCategory, selectedArea]);
 
   // Filter products based on active search controls
-  const filteredProducts = products.filter((p) => {
-    const matchesType = searchType === 'product';
-    const matchesQuery =
-      !searchQuery ||
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.category.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchesType = searchType === 'product';
+      const matchesQuery =
+        !searchQuery ||
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.category.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
-    const matchesArea = selectedArea === 'All' || p.vendorArea === selectedArea;
+      const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
+      const matchesArea = selectedArea === 'All' || p.vendorArea === selectedArea;
 
-    return (searchType === 'product' ? matchesType : true) && matchesQuery && matchesCat && matchesArea;
-  });
+      return (searchType === 'product' ? matchesType : true) && matchesQuery && matchesCat && matchesArea;
+    });
+  }, [products, searchType, searchQuery, selectedCategory, selectedArea]);
 
-  // Sponsored & Featured vendors (Only vendors manually assigned by Admin to Featured / Spotlight spots)
-  const sponsoredVendor = vendors.find((v) => (v.isLive || v.status === 'approved') && Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage ?? v.sponsoredCategorySlot)) || vendors[0];
-  const featuredVendors = vendors.filter(
-    (v) => (v.isLive || v.status === 'approved') && Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage)
-  );
+  // Helper to check if vendor is explicitly featured or has an active paid promotion
+  const isVendorFeatured = useCallback((v: Vendor) => {
+    if (v.status !== 'approved' || !v.isLive) return false;
+    const isExplicitlyFeatured = Boolean(v.featuredOnHomepage || v.isFeatured || v.is_featured || v.sponsoredCategorySlot);
+    const hasActivePromotion = promotions.some(
+      (p) =>
+        p.vendorId === v.id &&
+        (p.promotionType === 'sponsored_vendor' || p.promotionType === 'category_top_spot') &&
+        p.status === 'active' &&
+        new Date(p.expiryDate).getTime() > Date.now()
+    );
+    return isExplicitlyFeatured || hasActivePromotion;
+  }, [promotions]);
+
+  // Sponsored & Featured vendors (ONLY vendors manually assigned by Admin to Featured or having active paid promotion)
+  const sponsoredVendor = useMemo(() => {
+    return vendors.find((v) => isVendorFeatured(v));
+  }, [vendors, isVendorFeatured]);
+
+  const featuredVendors = useMemo(() => {
+    return vendors.filter((v) => {
+      if (!isVendorFeatured(v)) return false;
+      const matchesCat = selectedCategory === 'All' || v.subCategory === selectedCategory || v.category === selectedCategory;
+      const matchesArea = selectedArea === 'All' || v.area === selectedArea;
+      return matchesCat && matchesArea;
+    });
+  }, [vendors, isVendorFeatured, selectedCategory, selectedArea]);
   const activeBanner = banners[0];
 
   // Open WhatsApp chat directly with pre-filled message
@@ -318,6 +346,7 @@ export const HomePage: React.FC = () => {
               <div className="sm:col-span-5 relative">
                 <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
                 <input
+                  id="main-search"
                   type="text"
                   placeholder={
                     searchType === 'business'
@@ -457,6 +486,8 @@ export const HomePage: React.FC = () => {
                 <img
                   src={activeBanner.imageURL}
                   alt={activeBanner.title}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover"
                 />
                 <span className="absolute top-2 left-2 bg-amber-400 text-slate-950 font-black text-[10px] uppercase px-2 py-0.5 rounded-full shadow-md">
@@ -561,192 +592,250 @@ export const HomePage: React.FC = () => {
       </section>
 
       {/* 3. FEATURED VENDORS & CATEGORY TOP SPOT */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Award className="w-5 h-5 text-amber-500" />
-              <h2 className="text-2xl font-black text-slate-900">Featured Ikorodu Stores</h2>
-            </div>
-            <p className="text-xs text-slate-500">Verified local shops with direct WhatsApp response</p>
-          </div>
-          <button
-            onClick={() => setCurrentPage('auth')}
-            className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
-          >
-            Get Featured <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
+      {(() => {
+        const isFiltering = Boolean(searchQuery.trim() || selectedCategory !== 'All' || selectedArea !== 'All');
+        const activeVendorsList = isFiltering || vendorTab === 'all' ? filteredVendors : featuredVendors;
 
-        {/* Vendor Grid */}
-        <div id="results-section" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {isGridLoading ? (
-            /* Skeleton Loading State Cards for Perceived Performance */
-            Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={`skeleton-${index}`}
-                className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs animate-pulse flex flex-col justify-between"
-              >
-                <div>
-                  <div className="h-36 bg-slate-200 relative">
-                    <div className="absolute top-3 left-3 w-20 h-5 bg-slate-300 rounded-full"></div>
-                    <div className="absolute bottom-3 left-3 w-28 h-5 bg-slate-300 rounded-md"></div>
-                  </div>
-                  <div className="p-5 space-y-3">
-                    <div className="flex justify-between items-center">
-                      <div className="h-5 w-2/3 bg-slate-200 rounded-md"></div>
-                      <div className="h-5 w-12 bg-slate-200 rounded-md"></div>
-                    </div>
-                    <div className="h-3 w-full bg-slate-200 rounded-md"></div>
-                    <div className="h-3 w-4/5 bg-slate-200 rounded-md"></div>
-                    <div className="pt-2">
-                      <div className="h-6 w-32 bg-orange-100/60 rounded-lg"></div>
-                    </div>
-                  </div>
+        return (
+          <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Award className="w-5 h-5 text-amber-500" />
+                  <h2 className="text-2xl font-black text-slate-900">
+                    {isFiltering
+                      ? `Search Results (${filteredVendors.length})`
+                      : vendorTab === 'featured'
+                      ? `Featured Ikorodu Stores (${featuredVendors.length})`
+                      : `Ikorodu Business Directory (${filteredVendors.length})`}
+                  </h2>
                 </div>
-                <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
-                  <div className="h-4 w-24 bg-slate-200 rounded-md"></div>
-                  <div className="h-8 w-28 bg-emerald-200/50 rounded-xl"></div>
-                </div>
+                <p className="text-xs text-slate-500">
+                  {isFiltering
+                    ? `Showing verified stores matching active search filters`
+                    : vendorTab === 'featured'
+                    ? 'Intentionally featured local businesses and active paid promotions'
+                    : 'Complete directory of all approved local businesses in Ikorodu'}
+                </p>
               </div>
-            ))
-          ) : filteredVendors.length === 0 ? (
-            <div className="col-span-full bg-white p-10 rounded-3xl text-center border border-slate-200 space-y-3">
-              <Store className="w-12 h-12 text-slate-300 mx-auto" />
-              <h3 className="font-extrabold text-lg text-slate-900">No stores found in this area/category</h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Try selecting "All {ALL_IKORODU_AREAS.length} Ikorodu Areas" or "All Categories" to see all verified businesses.
-              </p>
-              <button
-                onClick={() => {
-                  setSelectedCategory('All');
-                  setSelectedArea('All');
-                  setSearchQuery('');
-                }}
-                className="bg-emerald-600 text-white font-bold text-xs px-4 py-2 rounded-xl"
-              >
-                Reset Search Filters
-              </button>
-            </div>
-          ) : (
-            filteredVendors.map((vendor) => {
-              const isFav = favorites.includes(vendor.id);
-              return (
-                <div
-                  key={vendor.id}
-                  onClick={() => navigateToStore(vendor.slug)}
-                  className={`bg-white rounded-3xl border overflow-hidden shadow-xs hover:shadow-xl transition group cursor-pointer flex flex-col justify-between ${
-                    vendor.sponsoredCategorySlot || vendor.featuredOnHomepage
-                      ? 'border-amber-300 ring-1 ring-amber-300'
-                      : 'border-slate-200'
-                  }`}
-                >
-                  <div>
-                    {/* Cover & Badges */}
-                    <div className="h-36 bg-slate-200 relative overflow-hidden">
-                      <img
-                        src={vendor.coverPhotoURL}
-                        alt={vendor.businessName}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent"></div>
 
-                      {/* Top Badges */}
-                      <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                        {vendor.sponsoredCategorySlot && (
-                          <span className="bg-amber-400 text-slate-950 font-black text-[10px] uppercase px-2 py-0.5 rounded-full shadow-md">
-                            Sponsored
-                          </span>
-                        )}
-                        <span className="bg-slate-900/80 backdrop-blur-xs text-emerald-300 font-bold text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/30">
-                          {vendor.subCategory}
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleFavorite(vendor.id);
-                        }}
-                        className={`absolute top-3 right-3 p-2 rounded-full backdrop-blur-md transition ${
-                          isFav ? 'bg-rose-500 text-white' : 'bg-slate-900/60 text-white hover:bg-slate-900'
-                        }`}
-                      >
-                        <Star className={`w-4 h-4 ${isFav ? 'fill-white' : ''}`} />
-                      </button>
-
-                      <div className="absolute bottom-3 left-3 flex items-center gap-2">
-                        <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-                          <MapPin className="w-3 h-3" /> {vendor.area}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Body */}
-                    <div className="p-5 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <h3 className="font-extrabold text-base text-slate-900 group-hover:text-emerald-600 transition line-clamp-1">
-                              {vendor.businessName}
-                            </h3>
-                            {(vendor.ninVerified || vendor.nin_verified) && (
-                              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300/80 shadow-2xs shrink-0">
-                                <ShieldCheck className="w-3 h-3 text-emerald-600" /> Verified
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">{vendor.address}</p>
-                        </div>
-                        <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg shrink-0">
-                          <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                          <span className="text-xs font-bold text-amber-900">{vendor.rating}</span>
-                          <span className="text-[10px] text-amber-700">({vendor.reviewCount})</span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
-                        {vendor.description}
-                      </p>
-
-                      {/* SPECIFIC IKORODU NEIGHBORHOOD LOCATION BADGE */}
-                      <div className="pt-1 flex items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-orange-50 text-orange-900 border border-orange-200/80 shadow-2xs">
-                          <MapPin className="w-3.5 h-3.5 text-orange-600 shrink-0" />
-                          <span>📍 {vendor.area} Neighborhood</span>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Footer Action */}
-                  <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                    {(vendor.ninVerified || vendor.nin_verified) ? (
-                      <div className="flex items-center gap-1.5 text-emerald-700 text-xs font-bold">
-                        <ShieldCheck className="w-4 h-4" />
-                        <span>Verified Shop</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 text-slate-500 text-xs font-medium">
-                        <Store className="w-4 h-4 text-slate-400" />
-                        <span>Listed Shop</span>
-                      </div>
-                    )}
-
+              <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap">
+                {!isFiltering && (
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200">
                     <button
-                      onClick={(e) => handleVendorWhatsApp(e, vendor.whatsapp, vendor.businessName)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition active:scale-95"
+                      onClick={() => setVendorTab('featured')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                        vendorTab === 'featured'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
                     >
-                      <MessageCircle className="w-4 h-4 fill-white" />
-                      Chat WhatsApp
+                      ⭐ Featured ({featuredVendors.length})
+                    </button>
+                    <button
+                      onClick={() => setVendorTab('all')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                        vendorTab === 'all'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      🏪 All Directory ({filteredVendors.length})
                     </button>
                   </div>
+                )}
+                <button
+                  onClick={() => setCurrentPage('auth')}
+                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+                >
+                  Get Featured <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Vendor Grid */}
+            <div id="results-section" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {isGridLoading ? (
+                /* Skeleton Loading State Cards for Perceived Performance */
+                Array.from({ length: 6 }).map((_, index) => (
+                  <div
+                    key={`skeleton-${index}`}
+                    className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs animate-pulse flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="h-36 bg-slate-200 relative">
+                        <div className="absolute top-3 left-3 w-20 h-5 bg-slate-300 rounded-full"></div>
+                        <div className="absolute bottom-3 left-3 w-28 h-5 bg-slate-300 rounded-md"></div>
+                      </div>
+                      <div className="p-5 space-y-3">
+                        <div className="flex justify-between items-center">
+                          <div className="h-5 w-2/3 bg-slate-200 rounded-md"></div>
+                          <div className="h-5 w-12 bg-slate-200 rounded-md"></div>
+                        </div>
+                        <div className="h-3 w-full bg-slate-200 rounded-md"></div>
+                        <div className="h-3 w-4/5 bg-slate-200 rounded-md"></div>
+                        <div className="pt-2">
+                          <div className="h-6 w-32 bg-orange-100/60 rounded-lg"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
+                      <div className="h-4 w-24 bg-slate-200 rounded-md"></div>
+                      <div className="h-8 w-28 bg-emerald-200/50 rounded-xl"></div>
+                    </div>
+                  </div>
+                ))
+              ) : activeVendorsList.length === 0 ? (
+                <div className="col-span-full bg-white p-10 rounded-3xl text-center border border-slate-200 space-y-3">
+                  <Store className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h3 className="font-extrabold text-lg text-slate-900">
+                    {!isFiltering && vendorTab === 'featured'
+                      ? 'No featured stores currently listed'
+                      : 'No stores found in this area/category'}
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    {!isFiltering && vendorTab === 'featured'
+                      ? 'All approved businesses can be viewed in the complete Ikorodu Directory below.'
+                      : `Try selecting "All ${ALL_IKORODU_AREAS.length} Ikorodu Areas" or "All Categories" to see all verified businesses.`}
+                  </p>
+                  <button
+                    onClick={() => {
+                      if (!isFiltering && vendorTab === 'featured') {
+                        setVendorTab('all');
+                      } else {
+                        setSelectedCategory('All');
+                        setSelectedArea('All');
+                        setSearchQuery('');
+                      }
+                    }}
+                    className="bg-emerald-600 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer hover:bg-emerald-700 transition"
+                  >
+                    {!isFiltering && vendorTab === 'featured' ? 'View All Store Directory' : 'Reset Search Filters'}
+                  </button>
                 </div>
-              );
-            })
-          )}
-        </div>
-      </section>
+              ) : (
+                activeVendorsList.map((vendor) => {
+                  const isFav = favorites.includes(vendor.id);
+                  return (
+                    <div
+                      key={vendor.id}
+                      onClick={() => navigateToStore(vendor.slug)}
+                      className={`bg-white rounded-3xl border overflow-hidden shadow-xs hover:shadow-xl transition group cursor-pointer flex flex-col justify-between ${
+                        vendor.sponsoredCategorySlot || vendor.featuredOnHomepage || vendor.isFeatured || vendor.is_featured
+                          ? 'border-amber-300 ring-1 ring-amber-300'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      <div>
+                        {/* Cover & Badges */}
+                        <div className="h-36 bg-slate-200 relative overflow-hidden">
+                          <img
+                            src={vendor.coverPhotoURL}
+                            alt={vendor.businessName}
+                            loading="lazy"
+                            decoding="async"
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent"></div>
+
+                          {/* Top Badges */}
+                          <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                            {(vendor.sponsoredCategorySlot || vendor.featuredOnHomepage || vendor.isFeatured || vendor.is_featured) && (
+                              <span className="bg-amber-400 text-slate-950 font-black text-[10px] uppercase px-2 py-0.5 rounded-full shadow-md">
+                                {vendor.sponsoredCategorySlot ? 'Sponsored' : 'Featured'}
+                              </span>
+                            )}
+                            <span className="bg-slate-900/80 backdrop-blur-xs text-emerald-300 font-bold text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/30">
+                              {vendor.subCategory}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleFavorite(vendor.id);
+                            }}
+                            className={`absolute top-3 right-3 p-2 rounded-full backdrop-blur-md transition ${
+                              isFav ? 'bg-rose-500 text-white' : 'bg-slate-900/60 text-white hover:bg-slate-900'
+                            }`}
+                          >
+                            <Star className={`w-4 h-4 ${isFav ? 'fill-white' : ''}`} />
+                          </button>
+
+                          <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                            <span className="bg-emerald-500 text-slate-950 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                              <MapPin className="w-3 h-3" /> {vendor.area}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-5 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h3 className="font-extrabold text-base text-slate-900 group-hover:text-emerald-600 transition line-clamp-1">
+                                  {vendor.businessName}
+                                </h3>
+                                {(vendor.ninVerified || vendor.nin_verified) && (
+                                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300/80 shadow-2xs shrink-0">
+                                    <ShieldCheck className="w-3 h-3 text-emerald-600" /> Verified
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">{vendor.address}</p>
+                            </div>
+                            <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg shrink-0">
+                              <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                              <span className="text-xs font-bold text-amber-900">{vendor.rating}</span>
+                              <span className="text-[10px] text-amber-700">({vendor.reviewCount})</span>
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                            {vendor.description}
+                          </p>
+
+                          {/* SPECIFIC IKORODU NEIGHBORHOOD LOCATION BADGE */}
+                          <div className="pt-1 flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-orange-50 text-orange-900 border border-orange-200/80 shadow-2xs">
+                              <MapPin className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                              <span>📍 {vendor.area} Neighborhood</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Footer Action */}
+                      <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                        {(vendor.ninVerified || vendor.nin_verified) ? (
+                          <div className="flex items-center gap-1.5 text-emerald-700 text-xs font-bold">
+                            <ShieldCheck className="w-4 h-4" />
+                            <span>Verified Shop</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-slate-500 text-xs font-medium">
+                            <Store className="w-4 h-4 text-slate-400" />
+                            <span>Listed Shop</span>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={(e) => handleVendorWhatsApp(e, vendor.whatsapp, vendor.businessName)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition active:scale-95"
+                        >
+                          <MessageCircle className="w-4 h-4 fill-white" />
+                          Chat WhatsApp
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* 4. TRENDING PRODUCTS GRID */}
       <section id="products-section" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
@@ -775,6 +864,8 @@ export const HomePage: React.FC = () => {
                     <img
                       src={prod.photoURL}
                       alt={prod.name}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
                     />
                     <div className="absolute bottom-3 left-3 bg-slate-950/80 backdrop-blur-xs text-amber-300 font-extrabold text-xs px-2.5 py-1 rounded-lg border border-amber-400/30">

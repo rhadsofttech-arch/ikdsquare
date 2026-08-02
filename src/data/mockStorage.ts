@@ -12,7 +12,7 @@ const FAVORITES_KEY = 'ikorodusquare_favorites_v1';
 const BANNERS_KEY = 'ikorodusquare_banners_v1';
 const ORDERS_KEY = 'ikorodusquare_orders_v1';
 const PROMOTIONS_KEY = 'ikorodusquare_promotions_v1';
-const SETTINGS_KEY = 'ikorodusquare_settings_v1';
+const SETTINGS_KEY = 'ikorodusquare_settings_v2';
 
 export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
   {
@@ -941,12 +941,45 @@ export class StorageManager {
 
   static getSettings(): AdminSettings {
     try {
+      // Clear legacy localStorage keys from prior versions
+      try {
+        localStorage.removeItem('ikorodusquare_settings');
+        localStorage.removeItem('ikorodusquare_settings_v1');
+      } catch {
+        // ignore
+      }
+
       const data = localStorage.getItem(SETTINGS_KEY);
       if (!data) {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(DEFAULT_ADMIN_SETTINGS));
         return DEFAULT_ADMIN_SETTINGS;
       }
-      return JSON.parse(data);
+      const settings = JSON.parse(data);
+
+      // Auto-migrate legacy Moniepoint/old bank details if found in user's saved storage
+      let needsMigration = false;
+      if (!settings.bankName || settings.bankName.includes('Moniepoint')) {
+        settings.bankName = DEFAULT_ADMIN_SETTINGS.bankName;
+        needsMigration = true;
+      }
+      if (!settings.accountName || settings.accountName === 'IkoroduSquare') {
+        settings.accountName = DEFAULT_ADMIN_SETTINGS.accountName;
+        needsMigration = true;
+      }
+      if (!settings.accountNumber || settings.accountNumber === '8123456789') {
+        settings.accountNumber = DEFAULT_ADMIN_SETTINGS.accountNumber;
+        needsMigration = true;
+      }
+      if (!settings.whatsappSupportNumber || settings.whatsappSupportNumber === '2348031234567') {
+        settings.whatsappSupportNumber = DEFAULT_ADMIN_SETTINGS.whatsappSupportNumber;
+        needsMigration = true;
+      }
+
+      if (needsMigration) {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      }
+
+      return settings;
     } catch {
       return DEFAULT_ADMIN_SETTINGS;
     }

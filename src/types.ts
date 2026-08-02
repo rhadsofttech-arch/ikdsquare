@@ -236,10 +236,10 @@ export interface AdminSettings {
 }
 
 export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
-  bankName: 'Moniepoint Microfinance Bank',
-  accountName: 'IkoroduSquare',
-  accountNumber: '8123456789',
-  whatsappSupportNumber: '2348031234567',
+  bankName: 'FCMB',
+  accountName: 'Rhadsoft Tech',
+  accountNumber: '9474918014',
+  whatsappSupportNumber: '08156655091',
 };
 
 

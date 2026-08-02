@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { StorageManager } from '../data/mockStorage';
 import { ALL_IKORODU_AREAS } from '../data/ikoroduData';
@@ -76,10 +76,10 @@ export const AdminDashboard: React.FC = () => {
   const [promoStatusFilter, setPromoStatusFilter] = useState<'all' | 'pending_verification' | 'active' | 'expired' | 'rejected'>('all');
 
   // Bank & Support Settings state
-  const [bankName, setBankName] = useState(adminSettings?.bankName || 'Moniepoint Microfinance Bank');
-  const [accountName, setAccountName] = useState(adminSettings?.accountName || 'IkoroduSquare');
-  const [accountNumber, setAccountNumber] = useState(adminSettings?.accountNumber || '8123456789');
-  const [whatsappSupportNumber, setWhatsappSupportNumber] = useState(adminSettings?.whatsappSupportNumber || '2348031234567');
+  const [bankName, setBankName] = useState(adminSettings?.bankName || 'FCMB');
+  const [accountName, setAccountName] = useState(adminSettings?.accountName || 'Rhadsoft Tech');
+  const [accountNumber, setAccountNumber] = useState(adminSettings?.accountNumber || '9474918014');
+  const [whatsappSupportNumber, setWhatsappSupportNumber] = useState(adminSettings?.whatsappSupportNumber || '08156655091');
 
   useEffect(() => {
     if (adminSettings) {
@@ -128,18 +128,40 @@ export const AdminDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'featured' | 'verified'>('all');
 
+  const pendingVendors = useMemo(() => vendors.filter((v) => v.status === 'pending'), [vendors]);
+  const approvedVendors = useMemo(() => vendors.filter((v) => v.status === 'approved'), [vendors]);
+
+  // Filtered vendors for directory/featured tab
+  const filteredVendors = useMemo(() => {
+    return vendors.filter((v) => {
+      const matchesSearch =
+        v.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        v.ownerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        v.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        v.area.toLowerCase().includes(searchQuery.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      if (statusFilter === 'pending') return v.status === 'pending' || !v.isLive;
+      if (statusFilter === 'approved') return v.status === 'approved' || v.isLive;
+      if (statusFilter === 'rejected') return v.status === 'rejected';
+      if (statusFilter === 'featured') return Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
+      if (statusFilter === 'verified') return Boolean(v.ninVerified || v.nin_verified);
+      return true;
+    });
+  }, [vendors, searchQuery, statusFilter]);
+
+  if (isLoading) {
+    return <DashboardSkeleton />;
+  }
+
   // 1. Unauthenticated Visitor: Render Dedicated Administrator Login Page
   if (!currentUser) {
     return <AdminLoginPage />;
   }
 
-  // 2. Authenticated with Non-Administrator Email: Sign Out Immediately & Display 403 Forbidden Page
+  // 2. Authenticated with Non-Administrator Email: Display Access Restricted Page
   if (!isAdminEmail(currentUser.email)) {
-    // Immediate sign out enforcement
-    logoutUser();
-    setCurrentUser(null);
-    StorageManager.setCurrentUser(null);
-
     return (
       <div className="min-h-[85vh] bg-slate-900 flex items-center justify-center p-4 py-12">
         <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-slate-200 space-y-5 animate-fade-in">
@@ -152,7 +174,7 @@ export const AdminDashboard: React.FC = () => {
             </span>
             <h2 className="font-extrabold text-2xl text-slate-900">Access Restricted</h2>
             <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-              Your account (<strong className="text-slate-900">{currentUser.email || 'Unrecognized User'}</strong>) is not authorized for IkoroduSquare administrator management. Access is strictly limited to <strong className="text-orange-600 underline">{getAdminEmail()}</strong>. You have been automatically signed out.
+              Your account (<strong className="text-slate-900">{currentUser.email || 'Unrecognized User'}</strong>) is not authorized for administrator access. Access is strictly limited to <strong className="text-orange-600 underline">{getAdminEmail()}</strong>.
             </p>
           </div>
           <div className="pt-2 flex flex-col gap-2.5">
@@ -163,41 +185,21 @@ export const AdminDashboard: React.FC = () => {
               Return to Marketplace Home
             </button>
             <button
-              onClick={() => setCurrentPage('admin')}
+              onClick={async () => {
+                await logoutUser();
+                setCurrentUser(null);
+                StorageManager.setCurrentUser(null);
+                setCurrentPage('admin');
+              }}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer"
             >
-              Sign In with Administrator Account
+              Sign In as Administrator
             </button>
           </div>
         </div>
       </div>
     );
   }
-
-  if (isLoading) {
-    return <DashboardSkeleton />;
-  }
-
-  const pendingVendors = vendors.filter((v) => v.status === 'pending');
-  const approvedVendors = vendors.filter((v) => v.status === 'approved');
-
-  // Filtered vendors for directory/featured tab
-  const filteredVendors = vendors.filter((v) => {
-    const matchesSearch =
-      v.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.ownerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.area.toLowerCase().includes(searchQuery.toLowerCase());
-
-    if (!matchesSearch) return false;
-
-    if (statusFilter === 'pending') return v.status === 'pending' || !v.isLive;
-    if (statusFilter === 'approved') return v.status === 'approved' || v.isLive;
-    if (statusFilter === 'rejected') return v.status === 'rejected';
-    if (statusFilter === 'featured') return Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
-    if (statusFilter === 'verified') return Boolean(v.ninVerified || v.nin_verified);
-    return true;
-  });
 
   const handleApprove = async (vendorId: string) => {
     await approveVendor(vendorId);
@@ -859,7 +861,7 @@ export const AdminDashboard: React.FC = () => {
             <Users className="w-10 h-10 text-slate-400 mx-auto" />
             <h4 className="font-bold text-slate-900 text-sm">Customer Activity Monitoring</h4>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Customer accounts are synced seamlessly via Supabase Auth and Firestore. All user details are verified for secure marketplace interaction.
+              Customer accounts are synced seamlessly via secure cloud storage. All user details are verified for secure marketplace interaction.
             </p>
           </div>
         </div>
@@ -946,7 +948,7 @@ export const AdminDashboard: React.FC = () => {
                   required
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
-                  placeholder="e.g. Moniepoint Microfinance Bank"
+                  placeholder="e.g. FCMB"
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -958,7 +960,7 @@ export const AdminDashboard: React.FC = () => {
                   required
                   value={accountName}
                   onChange={(e) => setAccountName(e.target.value)}
-                  placeholder="e.g. IkoroduSquare"
+                  placeholder="e.g. Rhadsoft Tech"
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -970,7 +972,7 @@ export const AdminDashboard: React.FC = () => {
                   required
                   value={accountNumber}
                   onChange={(e) => setAccountNumber(e.target.value)}
-                  placeholder="e.g. 8123456789"
+                  placeholder="e.g. 9474918014"
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -982,7 +984,7 @@ export const AdminDashboard: React.FC = () => {
                   required
                   value={whatsappSupportNumber}
                   onChange={(e) => setWhatsappSupportNumber(e.target.value)}
-                  placeholder="e.g. 2348031234567 or 08031234567"
+                  placeholder="e.g. 08156655091 or 2348156655091"
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">Vendors will be redirected to this WhatsApp number when clicking "I Have Made Payment".</p>
@@ -1011,7 +1013,7 @@ export const AdminDashboard: React.FC = () => {
               </div>
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <span className="font-bold text-slate-700">Authentication Driver</span>
-                <span className="font-bold text-slate-900">Supabase Auth (Persistent Session)</span>
+                <span className="font-bold text-slate-900">Cloud Authentication (Persistent Session)</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-700">Admin Route Restriction</span>
@@ -1041,7 +1043,7 @@ export const AdminDashboard: React.FC = () => {
               <span className="text-slate-500 text-[10px]">{new Date().toLocaleTimeString()}</span>
             </div>
             <div className="p-3 bg-slate-950 text-amber-300 rounded-xl flex items-center justify-between">
-              <span>[SYSTEM] Firestore & Supabase Auth persistent state active</span>
+              <span>[SYSTEM] Cloud Database & Authentication persistent state active</span>
               <span className="text-slate-500 text-[10px]">{new Date().toLocaleTimeString()}</span>
             </div>
           </div>

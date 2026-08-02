@@ -104,7 +104,7 @@ export const PromotionCheckoutModal: React.FC<PromotionCheckoutModalProps> = ({
       await createPromotionRequest(promoRequest);
 
       // Automated WhatsApp notification trigger
-      const cleanSupportNum = (adminSettings.whatsappSupportNumber || '2348031234567')
+      const cleanSupportNum = (adminSettings.whatsappSupportNumber || '08156655091')
         .replace(/\D/g, '')
         .replace(/^0/, '234');
 
@@ -115,11 +115,14 @@ I have made payment for a promotional package.
 Business Name:
 ${currentSelectedVendor.businessName}
 
-Promotion:
+Promotion Package:
 ${packageInfo.name}
 
-Amount:
+Amount Paid:
 ₦${packageInfo.price.toLocaleString()}
+
+Payment Reference:
+${refCode}
 
 Kindly verify my payment and activate my promotion.
 
@@ -284,29 +287,29 @@ Thank you.`;
             <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
               <Landmark className="w-4 h-4 text-amber-700" /> Payment Transfer Details
             </div>
-            <p className="text-slate-600 leading-relaxed">
-              Please transfer the total amount of <strong className="text-slate-900 font-extrabold">₦{packageInfo.price.toLocaleString()}</strong> to the official IkoroduSquare bank account below:
+            <p className="text-slate-600 leading-relaxed text-xs">
+              Please transfer the exact amount of <strong className="text-slate-900 font-extrabold">₦{packageInfo.price.toLocaleString()}</strong> to the account below:
             </p>
 
             <div className="bg-white p-3.5 rounded-xl border border-amber-200/80 space-y-2 font-mono">
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 uppercase text-[10px] font-sans font-bold">Bank Name:</span>
-                <span className="font-extrabold text-slate-900 text-xs">{adminSettings.bankName || 'Moniepoint Microfinance Bank'}</span>
+                <span className="text-slate-500 uppercase text-[10px] font-sans font-bold">Bank:</span>
+                <span className="font-extrabold text-slate-900 text-xs">{adminSettings.bankName || 'FCMB'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-500 uppercase text-[10px] font-sans font-bold">Account Name:</span>
-                <span className="font-extrabold text-slate-900 text-xs">{adminSettings.accountName || 'IkoroduSquare'}</span>
+                <span className="font-extrabold text-slate-900 text-xs">{adminSettings.accountName || 'Rhadsoft Tech'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-500 uppercase text-[10px] font-sans font-bold">Account Number:</span>
-                <span className="font-black text-emerald-700 text-sm tracking-wider">{adminSettings.accountNumber || '8123456789'}</span>
+                <span className="font-black text-emerald-700 text-sm tracking-wider">{adminSettings.accountNumber || '9474918014'}</span>
               </div>
             </div>
 
             <div className="flex items-start gap-2 text-amber-900 bg-amber-100/60 p-3 rounded-xl border border-amber-200 text-[11px] leading-relaxed">
               <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <span>
-                After making payment, click the button below to notify the IkoroduSquare team. Your promotion will be activated after payment has been verified.
+                After completing the transfer, click "I've Made Payment". You will be redirected to WhatsApp with a pre-filled payment notification. Your promotional request will remain Pending Verification until payment is confirmed by the IkoroduSquare Administrator. Once verified, your promotion will be activated for the selected duration.
               </span>
             </div>
           </div>
