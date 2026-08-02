@@ -11,21 +11,21 @@ export const isSupabaseConfigured = (): boolean => {
   return Boolean(supabaseUrl && supabaseAnonKey && supabase);
 };
 
-// Google Auth Sign-In via Supabase OAuth
+// Google Auth Sign-In via OAuth
 export async function signInWithGoogle() {
   if (!supabase) {
-    throw new Error('Supabase is not configured yet. Please provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+    throw new Error('Authentication service is not configured yet. Please contact support.');
   }
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin,
+      redirectTo: `${window.location.origin}/`,
     },
   });
 
   if (error) {
-    console.error('Supabase Google Sign-In Error:', error);
+    console.error('Google Sign-In Error:', error);
     throw error;
   }
   return data;
@@ -110,17 +110,17 @@ export async function resendSupabaseVerificationEmail(email: string): Promise<bo
   return true;
 }
 
-// Password Reset: Send Password Reset Email via Supabase Auth
+// Password Reset: Send Password Reset Email
 export async function sendPasswordResetEmail(email: string): Promise<{ success: boolean; error?: string }> {
   if (!supabase) {
-    return { success: false, error: 'Supabase is not configured yet.' };
+    return { success: false, error: 'Authentication service is not configured yet.' };
   }
   const redirectTo = `${window.location.origin}/#reset-password`;
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo,
   });
   if (error) {
-    console.error('Supabase Password Reset Error:', error);
+    console.error('Password Reset Error:', error);
     return { success: false, error: error.message };
   }
   return { success: true };
@@ -129,7 +129,7 @@ export async function sendPasswordResetEmail(email: string): Promise<{ success: 
 // Password Reset: Update User Password after recovery link click
 export async function updateUserPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
   if (!supabase) {
-    return { success: false, error: 'Supabase is not configured yet.' };
+    return { success: false, error: 'Authentication service is not configured yet.' };
   }
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) {
