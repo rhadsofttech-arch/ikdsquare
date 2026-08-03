@@ -146,25 +146,25 @@ Thank you.`;
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden my-8 transform transition-all">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden my-auto transform transition-all">
         {/* Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 p-6 text-white relative">
+        <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 p-5 sm:p-6 text-white relative shrink-0">
           <button
             onClick={onClose}
-            className="absolute top-5 right-5 p-2 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition cursor-pointer"
+            className="absolute top-4 right-4 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-wider mb-1">
             <Sparkles className="w-4 h-4" /> Promotional Add-on Request
           </div>
-          <h2 className="text-2xl font-black">{packageInfo.name}</h2>
+          <h2 className="text-xl sm:text-2xl font-black pr-10">{packageInfo.name}</h2>
           <p className="text-xs text-slate-300 mt-1">{packageInfo.description}</p>
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto text-xs">
+        <div className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1 text-xs">
           {/* Selected Business */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -316,10 +316,10 @@ Thank you.`;
         </div>
 
         {/* Footer Actions */}
-        <div className="p-6 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="p-4 sm:p-6 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <button
             onClick={onClose}
-            className="w-full sm:w-auto px-5 py-3 rounded-2xl border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 text-xs transition cursor-pointer"
+            className="w-full sm:w-auto px-5 py-3 min-h-[44px] flex items-center justify-center rounded-2xl border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 text-xs transition cursor-pointer"
           >
             Cancel
           </button>
@@ -327,7 +327,7 @@ Thank you.`;
           <button
             onClick={handleMadePayment}
             disabled={isSubmitting}
-            className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold px-6 py-3.5 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition cursor-pointer disabled:opacity-50"
+            className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold px-6 py-3.5 min-h-[44px] rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition cursor-pointer disabled:opacity-50"
           >
             <Send className="w-4 h-4" />
             {isSubmitting ? 'Submitting Request...' : 'I Have Made Payment'}

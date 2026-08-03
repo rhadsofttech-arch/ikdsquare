@@ -61,6 +61,7 @@ import {
   MessageCircle,
   CornerDownRight,
   Reply,
+  Menu,
 } from 'lucide-react';
 
 const PRESET_LOGOS = [
@@ -99,6 +100,8 @@ export const VendorDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'products' | 'enquiries' | 'reviews' | 'nin' | 'analytics' | 'settings' | 'promotions'
   >('dashboard');
+
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const [selectedPromoPackage, setSelectedPromoPackage] = useState<PromotionPackageInfo | null>(null);
   const [promoTabFilter, setPromoTabFilter] = useState<'all' | 'pending_verification' | 'active' | 'expired' | 'rejected'>('all');
@@ -382,8 +385,269 @@ export const VendorDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row">
-      {/* SIDEBAR NAVIGATION */}
-      <aside className="w-full lg:w-64 bg-slate-900 text-white p-5 space-y-6 shrink-0">
+      {/* MOBILE STICKY TOP HEADER */}
+      <div className="lg:hidden bg-slate-900 text-white px-4 py-3 sticky top-0 z-30 shadow-md border-b border-slate-800 flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-slate-800 overflow-hidden border border-slate-700 shrink-0">
+            <img src={activeVendor.logoURL} alt={activeVendor.businessName} className="w-full h-full object-cover" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-extrabold text-xs sm:text-sm text-white truncate max-w-[150px] xs:max-w-[200px]">
+              {activeVendor.businessName}
+            </h3>
+            <p className="text-[10px] text-slate-400 truncate flex items-center gap-1">
+              {activeVendor.isLive ? (
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live Store
+                </span>
+              ) : (
+                <span className="text-amber-400 font-bold">Pending Review</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => navigateToStore(activeVendor.slug)}
+            className="bg-orange-600 hover:bg-orange-700 text-white font-bold px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1 transition"
+          >
+            <Store className="w-3.5 h-3.5" />
+            <span className="hidden xs:inline">Store</span>
+          </button>
+          <button
+            onClick={() => setMobileDrawerOpen(!mobileDrawerOpen)}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition"
+            aria-label="Toggle drawer menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* MOBILE DRAWER SHEET */}
+      {mobileDrawerOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 lg:hidden transition-opacity"
+            onClick={() => setMobileDrawerOpen(false)}
+          />
+          <div className="fixed inset-y-0 left-0 w-72 max-w-[82vw] bg-slate-900 text-white z-50 p-4 sm:p-5 flex flex-col justify-between shadow-2xl lg:hidden animate-in slide-in-from-left duration-200 overflow-y-auto">
+            <div className="space-y-5">
+              {/* Drawer Header */}
+              <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-slate-800 overflow-hidden border border-slate-700 shrink-0">
+                    <img src={activeVendor.logoURL} alt={activeVendor.businessName} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-extrabold text-sm text-white truncate">{activeVendor.businessName}</h3>
+                    <p className="text-[10px] text-slate-400 truncate">📍 {activeVendor.area}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMobileDrawerOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Drawer Navigation Links */}
+              <nav className="space-y-1 text-xs font-semibold text-slate-300">
+                <button
+                  onClick={() => { setActiveTab('dashboard'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition ${
+                    activeTab === 'dashboard' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800'
+                  }`}
+                >
+                  <LayoutDashboard className="w-4 h-4" /> Overview
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('products'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition ${
+                    activeTab === 'products' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Package className="w-4 h-4" /> Products
+                  </span>
+                  <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full text-[10px]">
+                    {myProducts.length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('enquiries'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition ${
+                    activeTab === 'enquiries' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <MessageSquare className="w-4 h-4" /> WhatsApp Enquiries
+                  </span>
+                  {unreadEnquiries > 0 && (
+                    <span className="bg-rose-500 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">
+                      {unreadEnquiries} NEW
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('reviews'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition ${
+                    activeTab === 'reviews' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Star className="w-4 h-4 text-amber-400" /> Reviews
+                  </span>
+                  <span className="text-amber-400 font-bold">{activeVendor.rating}★</span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('nin'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition ${
+                    activeTab === 'nin'
+                      ? 'bg-amber-600 text-white font-bold'
+                      : activeVendor.ninVerified
+                      ? 'hover:bg-slate-800 text-slate-300'
+                      : 'bg-amber-950/60 text-amber-300 border border-amber-800/50'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-400" /> NIN Verification
+                  </span>
+                  {activeVendor.ninVerified ? (
+                    <span className="text-green-400 text-[10px] font-bold">✓ Verified</span>
+                  ) : (
+                    <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
+                      REQUIRED
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('settings'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition ${
+                    activeTab === 'settings' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800'
+                  }`}
+                >
+                  <Settings className="w-4 h-4" /> Edit Profile
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('analytics'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition ${
+                    activeTab === 'analytics' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800'
+                  }`}
+                >
+                  <TrendingUp className="w-4 h-4" /> Analytics
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('promotions'); setMobileDrawerOpen(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition ${
+                    activeTab === 'promotions' ? 'bg-orange-600 text-white font-bold' : 'hover:bg-slate-800 text-amber-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" /> Promotions
+                  </span>
+                  {myActivePromotions.length > 0 && (
+                    <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">
+                      {myActivePromotions.length} Active
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => navigateToStore(activeVendor.slug)}
+                  className="w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 hover:bg-slate-800 text-orange-400 pt-2 border-t border-slate-800/80"
+                >
+                  <Store className="w-4 h-4" /> View Live Store <ExternalLink className="w-3 h-3 ml-auto" />
+                </button>
+              </nav>
+            </div>
+
+            <div className="pt-4 border-t border-slate-800">
+              <button
+                onClick={() => {
+                  setCurrentUser(null);
+                  setCurrentPage('home');
+                }}
+                className="w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 hover:bg-rose-950/60 text-rose-400 font-semibold text-xs"
+              >
+                <LogOut className="w-4 h-4" /> Sign Out
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* MOBILE HORIZONTAL QUICK ACTION PILLS */}
+      <div className="lg:hidden bg-white border-b border-slate-200 px-3 py-2 overflow-x-auto flex items-center gap-2 text-xs font-semibold shrink-0 sticky top-[53px] z-20 shadow-2xs no-scrollbar">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'dashboard' ? 'bg-orange-600 text-white font-bold shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <LayoutDashboard className="w-4 h-4" /> Overview
+        </button>
+        <button
+          onClick={() => setActiveTab('products')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'products' ? 'bg-orange-600 text-white font-bold shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <Package className="w-4 h-4" /> Products ({myProducts.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('enquiries')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'enquiries' ? 'bg-orange-600 text-white font-bold shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" /> Enquiries {unreadEnquiries > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-black">{unreadEnquiries}</span>}
+        </button>
+        <button
+          onClick={() => setActiveTab('reviews')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'reviews' ? 'bg-orange-600 text-white font-bold shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <Star className="w-4 h-4 text-amber-500" /> Reviews ({activeVendor.rating}★)
+        </button>
+        <button
+          onClick={() => setActiveTab('nin')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'nin' ? 'bg-amber-600 text-white font-bold shadow-xs' : activeVendor.ninVerified ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-amber-100 text-amber-900 border border-amber-300'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-amber-600" /> NIN {activeVendor.ninVerified ? '✓' : 'REQUIRED'}
+        </button>
+        <button
+          onClick={() => setActiveTab('promotions')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'promotions' ? 'bg-orange-600 text-white font-bold shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-amber-500" /> Ads & Promos
+        </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`px-3.5 py-2.5 min-h-[44px] rounded-full whitespace-nowrap transition flex items-center gap-1.5 shrink-0 active:scale-95 ${
+            activeTab === 'settings' ? 'bg-orange-600 text-white font-bold shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <Settings className="w-4 h-4" /> Settings
+        </button>
+      </div>
+
+      {/* DESKTOP SIDEBAR NAVIGATION */}
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-slate-900 text-white p-5 space-y-6 shrink-0 border-r border-slate-800 min-h-screen">
         {/* Vendor Header Info */}
         <div className="pb-4 border-b border-slate-800 space-y-2">
           <div className="flex items-center gap-3">
@@ -540,16 +804,64 @@ export const VendorDashboard: React.FC = () => {
       </aside>
 
       {/* MAIN DASHBOARD CONTENT */}
-      <main className="flex-1 p-4 sm:p-8 space-y-6 max-w-6xl mx-auto">
+      <main className="flex-1 p-3.5 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 max-w-6xl mx-auto pb-28 lg:pb-12 min-w-0">
+        {/* STORE PROFILE SUMMARY CARD */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-3">
+          <div className="flex flex-col xs:flex-row items-start xs:items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-xs">
+                <img src={activeVendor.logoURL} alt={activeVendor.businessName} className="w-full h-full object-cover" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="font-extrabold text-base sm:text-xl text-slate-900 truncate max-w-[180px] xs:max-w-[240px] sm:max-w-md">
+                    {activeVendor.businessName}
+                  </h1>
+                  {activeVendor.isLive ? (
+                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Live Store
+                    </span>
+                  ) : (
+                    <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0">
+                      Pending Approval
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 font-medium truncate mt-0.5">
+                  {activeVendor.category} • 📍 {activeVendor.area}, Ikorodu
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full xs:w-auto shrink-0 pt-1 xs:pt-0 border-t xs:border-0 border-slate-100">
+              <button
+                onClick={() => setActiveTab('settings')}
+                className="flex-1 xs:flex-initial bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 font-bold px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+              >
+                <Edit className="w-4 h-4 text-slate-600" />
+                <span>Edit Profile</span>
+              </button>
+              <button
+                onClick={() => navigateToStore(activeVendor.slug)}
+                className="flex-1 xs:flex-initial bg-orange-600 hover:bg-orange-700 active:scale-98 text-white font-bold px-4 py-2.5 min-h-[44px] rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
+              >
+                <Store className="w-4 h-4" />
+                <span>View Store</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* DYNAMIC SETUP PROGRESS / PENDING VS LIVE BANNER */}
         {!activeVendor.isLive ? (
-          <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 p-6 rounded-3xl shadow-md space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xs space-y-3 sm:space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
                 <span className="bg-slate-950 text-amber-300 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full">
                   STORE NOT LIVE YET
                 </span>
-                <h2 className="text-xl sm:text-2xl font-black mt-1">Setup Progress (75% Complete)</h2>
+                <h2 className="text-lg sm:text-2xl font-black mt-1">Setup Progress (75% Complete)</h2>
                 <p className="text-xs font-medium text-slate-900 mt-0.5">
                   Complete your NIN verification and add at least 1 product to unlock admin approval.
                 </p>
@@ -557,7 +869,7 @@ export const VendorDashboard: React.FC = () => {
 
               <button
                 onClick={() => setShowNinModal(true)}
-                className="bg-slate-950 hover:bg-slate-900 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shrink-0 shadow-sm"
+                className="bg-slate-950 hover:bg-slate-900 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 w-full sm:w-auto shrink-0 shadow-xs"
               >
                 <ShieldCheck className="w-4 h-4 text-amber-300" />
                 {activeVendor.ninVerified ? 'NIN Verified ✓' : 'Verify NIN Now'}
@@ -573,52 +885,53 @@ export const VendorDashboard: React.FC = () => {
             </div>
 
             {/* Checklist items */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold pt-1">
               <div className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-slate-950" /> Profile Details Done
+                <CheckCircle2 className="w-4 h-4 text-slate-950 shrink-0" /> <span className="truncate">Profile Details</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-slate-950" /> WhatsApp Verified
+                <CheckCircle2 className="w-4 h-4 text-slate-950 shrink-0" /> <span className="truncate">WhatsApp Verified</span>
               </div>
               <div className="flex items-center gap-1.5">
                 {activeVendor.ninVerified ? (
-                  <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                  <CheckCircle2 className="w-4 h-4 text-slate-950 shrink-0" />
                 ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-900" />
+                  <AlertCircle className="w-4 h-4 text-rose-900 shrink-0" />
                 )}
-                <span>NIN Verification</span>
+                <span className="truncate">NIN Verification</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-slate-950" /> Admin Review Pending
+                <Clock className="w-4 h-4 text-slate-950 shrink-0" /> <span className="truncate">Admin Review</span>
               </div>
             </div>
           </div>
         ) : (
-          <div className="bg-gradient-to-r from-emerald-800 to-emerald-950 text-white p-6 rounded-3xl shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="bg-emerald-400 text-slate-950 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full">
+          <div className="bg-gradient-to-r from-emerald-800 to-emerald-950 text-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="bg-emerald-400 text-slate-950 text-[10px] font-black uppercase px-2 py-0.5 rounded-full">
                   STORE IS LIVE
                 </span>
                 <span className="text-xs text-emerald-300">Public URL:</span>
               </div>
-              <h2 className="text-xl font-extrabold mt-1 text-white flex items-center gap-2">
-                ikorodusquare.com.ng/store/{activeVendor.slug}
+              <h2 className="text-xs sm:text-base font-bold mt-1 text-white break-all flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>ikorodusquare.com.ng/store/{activeVendor.slug}</span>
               </h2>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 pt-1 sm:pt-0">
               <button
                 onClick={() => setActiveTab('settings')}
-                className="bg-emerald-900 hover:bg-emerald-800 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shrink-0 border border-emerald-700/60 shadow-sm"
+                className="flex-1 sm:flex-initial bg-emerald-900 hover:bg-emerald-800 active:scale-98 text-white font-bold px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs flex items-center justify-center gap-1.5 border border-emerald-700/60 shadow-xs"
               >
-                <Settings className="w-4 h-4 text-emerald-300" /> Edit Store Profile
+                <Settings className="w-4 h-4 text-emerald-300" /> <span className="truncate">Edit Profile</span>
               </button>
               <button
                 onClick={() => navigateToStore(activeVendor.slug)}
-                className="bg-white text-emerald-950 hover:bg-emerald-50 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shrink-0 shadow-md"
+                className="flex-1 sm:flex-initial bg-white text-emerald-950 hover:bg-emerald-50 active:scale-98 font-bold px-4 py-2.5 min-h-[44px] rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs"
               >
-                <Store className="w-4 h-4 text-emerald-600" /> Open Online Shop
+                <Store className="w-4 h-4 text-emerald-600" /> <span className="truncate">Open Store</span>
               </button>
             </div>
           </div>
@@ -626,25 +939,25 @@ export const VendorDashboard: React.FC = () => {
 
         {/* TAB 1: DASHBOARD OVERVIEW */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {/* FEATURED SUMMARY CARDS: TOTAL VIEWS, ORDERS RECEIVED, RECENT ACTIVITY */}
             <div className="space-y-3">
               <h3 className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">Store Performance Summary</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5">
                 {/* SUMMARY CARD 1: TOTAL VIEWS */}
-                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden">
+                <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-extrabold text-slate-600 uppercase tracking-wider">Total Views</span>
-                    <div className="p-2.5 rounded-2xl bg-blue-50 text-blue-600">
-                      <Eye className="w-5 h-5" />
+                    <div className="p-2 sm:p-2.5 rounded-2xl bg-blue-50 text-blue-600">
+                      <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                   </div>
                   <div>
                     <div className="flex items-baseline gap-2">
-                      <p className="text-3xl font-black text-slate-900">
+                      <p className="text-2xl sm:text-3xl font-black text-slate-900">
                         {(activeVendor.analytics.profileViews + activeVendor.analytics.productViews).toLocaleString()}
                       </p>
-                      <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] sm:text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
                         +18% this month
                       </span>
                     </div>
@@ -653,52 +966,52 @@ export const VendorDashboard: React.FC = () => {
                     </p>
                   </div>
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Hyperlocal Ikorodu Visibility</span>
+                    <span>Ikorodu Visibility</span>
                     <span className="font-bold text-blue-600">High Traffic</span>
                   </div>
                 </div>
 
                 {/* SUMMARY CARD 2: ORDERS RECEIVED */}
-                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden">
+                <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden flex flex-col justify-between">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-slate-600 uppercase tracking-wider">Orders Received</span>
-                    <div className="p-2.5 rounded-2xl bg-emerald-50 text-emerald-600">
-                      <ShoppingBag className="w-5 h-5" />
+                    <span className="text-xs font-extrabold text-slate-600 uppercase tracking-wider">Orders & Enquiries</span>
+                    <div className="p-2 sm:p-2.5 rounded-2xl bg-emerald-50 text-emerald-600">
+                      <ShoppingBag className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                   </div>
                   <div>
                     <div className="flex items-baseline gap-2">
-                      <p className="text-3xl font-black text-emerald-700">
+                      <p className="text-2xl sm:text-3xl font-black text-emerald-700">
                         {(activeVendor.analytics.whatsappTaps + myEnquiries.length).toLocaleString()}
                       </p>
-                      <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] sm:text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                         {unreadEnquiries > 0 ? `${unreadEnquiries} New` : 'Active Leads'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      WhatsApp Orders: <strong className="text-slate-800">{activeVendor.analytics.whatsappTaps.toLocaleString()}</strong> • Messages: <strong className="text-slate-800">{myEnquiries.length.toLocaleString()}</strong>
+                      WhatsApp: <strong className="text-slate-800">{activeVendor.analytics.whatsappTaps.toLocaleString()}</strong> • Messages: <strong className="text-slate-800">{myEnquiries.length.toLocaleString()}</strong>
                     </p>
                   </div>
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Direct WhatsApp & Chat Enquiries</span>
+                    <span>Direct WhatsApp & Chat</span>
                     <span className="font-bold text-emerald-600">100% Direct</span>
                   </div>
                 </div>
 
                 {/* SUMMARY CARD 3: RECENT ACTIVITY */}
-                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden">
+                <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden sm:col-span-2 lg:col-span-1 flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-extrabold text-slate-600 uppercase tracking-wider">Recent Activity</span>
-                    <div className="p-2.5 rounded-2xl bg-purple-50 text-purple-600">
-                      <Activity className="w-5 h-5" />
+                    <div className="p-2 sm:p-2.5 rounded-2xl bg-purple-50 text-purple-600">
+                      <Activity className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                   </div>
                   <div>
                     <div className="flex items-baseline gap-2">
-                      <p className="text-3xl font-black text-slate-900">
+                      <p className="text-2xl sm:text-3xl font-black text-slate-900">
                         {myEnquiries.length + myReviews.length + myProducts.length}
                       </p>
-                      <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="text-[10px] sm:text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse"></span>
                         Live Tracker
                       </span>
@@ -720,29 +1033,29 @@ export const VendorDashboard: React.FC = () => {
             </div>
 
             {/* Quick Stats Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
                 <p className="text-xs text-slate-500 font-medium">Profile Views</p>
-                <p className="text-2xl font-black text-slate-900">
+                <p className="text-xl sm:text-2xl font-black text-slate-900">
                   {activeVendor.analytics.profileViews.toLocaleString()}
                 </p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
                 <p className="text-xs text-slate-500 font-medium">WhatsApp Taps</p>
-                <p className="text-2xl font-black text-emerald-600">
+                <p className="text-xl sm:text-2xl font-black text-emerald-600">
                   {activeVendor.analytics.whatsappTaps.toLocaleString()}
                 </p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
                 <p className="text-xs text-slate-500 font-medium">Catalogue Products</p>
-                <p className="text-2xl font-black text-slate-900">{myProducts.length}</p>
+                <p className="text-xl sm:text-2xl font-black text-slate-900">{myProducts.length}</p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
                 <p className="text-xs text-slate-500 font-medium">Customer Rating</p>
-                <p className="text-2xl font-black text-amber-500">{activeVendor.rating} ★</p>
+                <p className="text-xl sm:text-2xl font-black text-amber-500">{activeVendor.rating} ★</p>
               </div>
             </div>
 
@@ -990,22 +1303,22 @@ export const VendorDashboard: React.FC = () => {
                 <div className="space-y-2">
                   <label className="block text-xs font-bold text-slate-700">Enter Your 11-Digit NIN Number *</label>
 
-                  <div className="relative flex items-center">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
                       maxLength={11}
                       placeholder="e.g. 12345678901"
                       value={ninInput}
                       onChange={(e) => setNinInput(e.target.value.replace(/\D/g, ''))}
-                      className="w-full pr-36 pl-3.5 py-3 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-amber-500 outline-none font-bold tracking-wider text-slate-900"
+                      className="flex-1 px-3.5 py-3 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-amber-500 outline-none font-bold tracking-wider text-slate-900 min-h-[44px]"
                     />
 
-                    {/* As soon as 11 digits are entered, Verify with NIMC button appears attached to right */}
+                    {/* As soon as 11 digits are entered, Verify button enables */}
                     {ninInput.length === 11 && (
                       <button
                         onClick={handleVerifyNIN}
                         disabled={ninLoading}
-                        className="absolute right-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition flex items-center gap-1.5"
+                        className="bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 shrink-0 min-h-[44px]"
                       >
                         {ninLoading ? (
                           <span className="animate-spin text-xs">🌀 Verifying...</span>
@@ -1327,7 +1640,7 @@ export const VendorDashboard: React.FC = () => {
                     ) : (
                       /* Action Toolbar */
                       <div className="flex items-center justify-between pt-1 flex-wrap gap-2 text-xs">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
                           <button
                             onClick={() => {
                               setReplyingEnquiryId(enq.id);
@@ -1338,25 +1651,25 @@ export const VendorDashboard: React.FC = () => {
                                 });
                               }
                             }}
-                            className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition text-xs shadow-2xs"
+                            className="bg-slate-900 hover:bg-slate-800 active:scale-98 text-white font-bold px-3.5 py-2.5 min-h-[44px] rounded-xl flex items-center justify-center gap-1.5 transition text-xs shadow-2xs flex-1 sm:flex-initial"
                           >
-                            <Reply className="w-3.5 h-3.5 text-orange-400" />
-                            {enq.replyText ? 'Edit Reply' : 'Reply Message'}
+                            <Reply className="w-4 h-4 text-orange-400" />
+                            <span>{enq.replyText ? 'Edit Reply' : 'Reply Message'}</span>
                           </button>
 
                           <button
                             onClick={() => handleWhatsAppReply(enq)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition text-xs shadow-2xs"
+                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white font-bold px-3.5 py-2.5 min-h-[44px] rounded-xl flex items-center justify-center gap-1.5 transition text-xs shadow-2xs flex-1 sm:flex-initial"
                           >
-                            <MessageCircle className="w-3.5 h-3.5" />
-                            Reply via WhatsApp
+                            <MessageCircle className="w-4 h-4" />
+                            <span>Reply via WhatsApp</span>
                           </button>
 
                           <a
                             href={`tel:${enq.customerPhone}`}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-3 py-2 rounded-xl flex items-center gap-1 transition text-xs border border-slate-300"
+                            className="bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 font-semibold px-3.5 py-2.5 min-h-[44px] rounded-xl flex items-center justify-center gap-1.5 transition text-xs border border-slate-300"
                           >
-                            <Phone className="w-3.5 h-3.5 text-slate-600" /> Call
+                            <Phone className="w-4 h-4 text-slate-600" /> <span>Call</span>
                           </a>
                         </div>
 
@@ -1894,9 +2207,9 @@ export const VendorDashboard: React.FC = () => {
 
                     <button
                       onClick={() => setSelectedPromoPackage(pkg)}
-                      className="w-full bg-slate-900 hover:bg-emerald-600 text-white font-extrabold py-3 rounded-2xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                      className="w-full bg-slate-900 hover:bg-emerald-600 active:scale-98 text-white font-extrabold py-3 min-h-[44px] rounded-2xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400" /> {pkg.buttonLabel}
+                      <Sparkles className="w-4 h-4 text-amber-400" /> {pkg.buttonLabel}
                     </button>
                   </div>
                 ))}

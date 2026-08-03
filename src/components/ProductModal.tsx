@@ -90,19 +90,19 @@ export const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, pro
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200">
-        <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200 my-auto">
+        <div className="bg-slate-900 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <Package className="w-5 h-5 text-orange-400" />
-            <h3 className="font-bold text-lg">{productToEdit ? 'Edit Product' : 'Add New Product'}</h3>
+            <h3 className="font-bold text-base sm:text-lg">{productToEdit ? 'Edit Product' : 'Add New Product'}</h3>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white p-1">
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl hover:bg-white/10 transition">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs sm:text-sm">
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Product Title *</label>
             <input
@@ -194,7 +194,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, pro
 
           <button
             type="submit"
-            className="w-full mt-4 bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-xl shadow-sm transition text-sm"
+            className="w-full mt-4 bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white font-bold py-3 min-h-[44px] rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2"
           >
             {productToEdit ? 'Save Changes' : 'Publish Product to Store'}
           </button>
