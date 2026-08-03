@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { supabase, loginWithEmailPassword, sendPasswordResetEmail, logoutUser } from '../services/supabase';
 import { isAdminEmail, getAdminEmail } from '../lib/admin';
@@ -17,7 +17,13 @@ import {
 } from 'lucide-react';
 
 export const AdminLoginPage: React.FC = () => {
-  const { setCurrentUser, setCurrentPage, showToast } = useApp();
+  const { currentUser, setCurrentUser, setCurrentPage, showToast } = useApp();
+
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      setCurrentPage('admin');
+    }
+  }, [currentUser, setCurrentPage]);
   const [email, setEmail] = useState(getAdminEmail());
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

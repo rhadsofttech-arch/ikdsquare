@@ -33,7 +33,20 @@ import {
 } from 'lucide-react';
 
 export const AuthPage: React.FC = () => {
-  const { setCurrentUser, setCurrentPage, showToast, refreshData } = useApp();
+  const { currentUser, setCurrentUser, setCurrentPage, showToast, refreshData } = useApp();
+
+  // Redirect if user is already authenticated
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.role === 'admin') {
+        setCurrentPage('admin');
+      } else if (currentUser.role === 'vendor') {
+        setCurrentPage('dashboard');
+      } else {
+        setCurrentPage('home');
+      }
+    }
+  }, [currentUser, setCurrentPage]);
 
   const [authTab, setAuthTab] = useState<'signin' | 'register'>(() => {
     if (typeof window !== 'undefined') {
