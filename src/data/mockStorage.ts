@@ -139,7 +139,7 @@ export const SEED_ENQUIRIES: Enquiry[] = [
 ];
 
 // Data Mappers between TypeScript and Supabase PostgreSQL schema
-function vendorToRow(v: Vendor) {
+export function vendorToRow(v: Vendor) {
   const isFeaturedVal = Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
   return {
     id: v.id,
@@ -170,7 +170,7 @@ function vendorToRow(v: Vendor) {
   };
 }
 
-function rowToVendor(r: any): Vendor {
+export function rowToVendor(r: any): Vendor {
   const isFeaturedVal = Boolean(r.is_featured ?? r.isFeatured ?? r.featuredOnHomepage ?? false);
   const ninVerifiedVal = Boolean(r.nin_verified ?? r.ninVerified ?? false);
   return {
@@ -507,17 +507,45 @@ export class StorageManager {
   }
 
   static async addVendorAsync(newVendor: Vendor): Promise<Vendor> {
-    const vendors = this.getVendors();
-    vendors.unshift(newVendor);
-    this.saveVendors(vendors);
-
     if (supabase) {
       try {
-        await supabase.from('vendors').upsert(vendorToRow(newVendor));
+        if (newVendor.email) {
+          const { data: existingSupaVendor } = await supabase
+            .from('vendors')
+            .select('*')
+            .ilike('email', newVendor.email)
+            .maybeSingle();
+
+          if (existingSupaVendor) {
+            newVendor.id = existingSupaVendor.id;
+          }
+        }
+
+        const row = vendorToRow(newVendor);
+        console.log('[Supabase] Inserting/updating vendor in database table "vendors":', row.id, row.business_name);
+        const { data, error } = await supabase.from('vendors').upsert(row).select();
+        if (error) {
+          console.error('❌ Supabase vendor insert error:', error.message, error.details, error.code, error.hint);
+        } else if (data && data.length > 0) {
+          console.log('✅ Vendor record successfully written in Supabase database:', data);
+          newVendor = rowToVendor(data[0]);
+        }
       } catch (error) {
-        console.error('Supabase write error (vendor):', error);
+        console.error('❌ Exception writing vendor to Supabase:', error);
       }
     }
+
+    const vendors = this.getVendors();
+    const existingIndex = vendors.findIndex(
+      (v) => v.id === newVendor.id || (v.email && v.email.toLowerCase() === newVendor.email?.toLowerCase())
+    );
+    if (existingIndex !== -1) {
+      vendors[existingIndex] = newVendor;
+    } else {
+      vendors.unshift(newVendor);
+    }
+    this.saveVendors(vendors);
+
     return newVendor;
   }
 

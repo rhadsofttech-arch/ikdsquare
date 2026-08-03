@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Vendor, Product, Review, Enquiry, BannerAd, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS } from '../types';
-import { StorageManager } from '../data/mockStorage';
+import { StorageManager, rowToVendor } from '../data/mockStorage';
 import { ApiService } from '../services/api';
 import { supabase } from '../services/supabase';
 import { Language, TRANSLATIONS } from '../data/translations';
@@ -224,7 +224,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(initialNav.slug);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [currentUser, setCurrentUser] = useState<User | null>(() => StorageManager.getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -269,8 +269,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setCurrentPage = (page: string) => {
     // Route Protection for authenticated pages
+    const isEffectiveAdmin = isAdminMode || currentUser?.role === 'admin';
     const protectedPages = ['dashboard', 'admin', 'profile', 'user-profile'];
-    if (protectedPages.includes(page) && !currentUser && !isAdminMode && page !== 'admin') {
+    if (protectedPages.includes(page) && !currentUser && !isEffectiveAdmin && page !== 'admin') {
       showToast('info', 'Authentication Required', 'Please sign in to access your dashboard or profile.');
       setCurrentPageState('auth');
       updateUrlAndStorage('auth', null);
@@ -323,6 +324,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('info', 'Promotion Updated', `Promotion status updated to ${readableStatus}.`);
   };
 
+  const resolveUserFromSupabase = async (supaUser: any): Promise<User> => {
+    const email = supaUser.email || '';
+    const isAdmin = isAdminEmail(email);
+
+    // Direct DB lookup for vendor record matching email
+    let matchingVendor: Vendor | null = null;
+    if (supabase) {
+      try {
+        const { data: supaVendor } = await supabase
+          .from('vendors')
+          .select('*')
+          .ilike('email', email)
+          .maybeSingle();
+        if (supaVendor) {
+          matchingVendor = rowToVendor(supaVendor);
+        }
+      } catch (e) {
+        console.warn('Supabase vendor resolution query warning:', e);
+      }
+    }
+
+    if (!matchingVendor) {
+      const localVendors = StorageManager.getVendors();
+      matchingVendor = localVendors.find((v) => v.email?.toLowerCase() === email.toLowerCase()) || null;
+    }
+
+    // Direct DB lookup for users table record
+    let supaUserRow: any = null;
+    if (supabase) {
+      try {
+        const { data: uRow } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', supaUser.id)
+          .maybeSingle();
+        if (uRow) supaUserRow = uRow;
+      } catch (e) {
+        console.warn('Supabase user row resolution query warning:', e);
+      }
+    }
+
+    const role: 'admin' | 'vendor' | 'customer' = isAdmin
+      ? 'admin'
+      : matchingVendor
+      ? 'vendor'
+      : (supaUserRow?.role || supaUser.user_metadata?.role || 'customer');
+
+    const vendorId = matchingVendor ? matchingVendor.id : (supaUserRow?.vendor_id || undefined);
+
+    const name = isAdmin
+      ? 'Platform Administrator'
+      : matchingVendor
+      ? matchingVendor.ownerName
+      : supaUserRow?.name || supaUser.user_metadata?.full_name || email.split('@')[0] || 'Ikorodu Shopper';
+
+    const phone = matchingVendor?.phone || matchingVendor?.whatsapp || supaUserRow?.phone || supaUser.phone || '';
+    const area = matchingVendor?.area || supaUserRow?.area || supaUser.user_metadata?.area || '';
+
+    return {
+      id: supaUser.id,
+      name,
+      email: email || undefined,
+      emailVerified: Boolean(supaUser.email_confirmed_at),
+      phone,
+      role,
+      vendorId,
+      area,
+      createdAt: supaUserRow?.created_at || matchingVendor?.createdAt || supaUser.created_at || new Date().toISOString(),
+    };
+  };
+
   useEffect(() => {
     refreshData();
     const timer = setTimeout(() => {
@@ -337,32 +409,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let authSubscription: { unsubscribe: () => void } | null = null;
     if (supabase) {
       // 1. Initial Session Restoration
-      supabase.auth.getSession().then(({ data: { session } }) => {
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
         if (session?.user) {
-          const supaUser = session.user;
-          const existing = StorageManager.getCurrentUser();
-          const vendors = StorageManager.getVendors();
-          const matchingVendor = vendors.find(v => v.email?.toLowerCase() === supaUser.email?.toLowerCase());
-          const isAdmin = isAdminEmail(supaUser.email);
-
-          const syncedUser: User = {
-            id: supaUser.id,
-            name: isAdmin
-              ? 'Platform Administrator'
-              : matchingVendor
-              ? matchingVendor.ownerName
-              : (existing?.name || supaUser.user_metadata?.full_name || supaUser.email?.split('@')[0] || 'Ikorodu Shopper'),
-            email: supaUser.email || undefined,
-            emailVerified: Boolean(supaUser.email_confirmed_at),
-            phone: supaUser.phone || existing?.phone || matchingVendor?.phone || '',
-            role: isAdmin ? 'admin' : matchingVendor ? 'vendor' : (existing?.role || 'customer'),
-            vendorId: matchingVendor?.id || existing?.vendorId,
-            createdAt: existing?.createdAt || new Date().toISOString(),
-          };
-
+          const syncedUser = await resolveUserFromSupabase(session.user);
           setCurrentUser(syncedUser);
-          StorageManager.setCurrentUser(syncedUser);
+        } else {
+          setCurrentUser(null);
         }
+        setIsLoading(false);
       });
 
       // 2. Auth State Listener
@@ -375,34 +429,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (event === 'SIGNED_OUT') {
           setCurrentUser(null);
-          StorageManager.setCurrentUser(null);
           return;
         }
 
         if (session?.user) {
-          const supaUser = session.user;
-          const existing = StorageManager.getCurrentUser();
-          const vendors = StorageManager.getVendors();
-          const matchingVendor = vendors.find(v => v.email?.toLowerCase() === supaUser.email?.toLowerCase());
-          const isAdmin = isAdminEmail(supaUser.email);
-
-          const syncedUser: User = {
-            id: supaUser.id,
-            name: isAdmin
-              ? 'Platform Administrator'
-              : matchingVendor
-              ? matchingVendor.ownerName
-              : (existing?.name || supaUser.user_metadata?.full_name || supaUser.email?.split('@')[0] || 'Ikorodu Shopper'),
-            email: supaUser.email || undefined,
-            emailVerified: Boolean(supaUser.email_confirmed_at),
-            phone: supaUser.phone || existing?.phone || matchingVendor?.phone || '',
-            role: isAdmin ? 'admin' : matchingVendor ? 'vendor' : (existing?.role || 'customer'),
-            vendorId: matchingVendor?.id || existing?.vendorId,
-            createdAt: existing?.createdAt || new Date().toISOString(),
-          };
-
+          const syncedUser = await resolveUserFromSupabase(session.user);
           setCurrentUser(syncedUser);
-          StorageManager.setCurrentUser(syncedUser);
+        } else {
+          setCurrentUser(null);
         }
       });
       authSubscription = data.subscription;
@@ -452,13 +486,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  useEffect(() => {
-    StorageManager.setCurrentUser(currentUser);
-  }, [currentUser]);
-
   // Derived active vendor if logged in vendor or viewing store
-  const activeVendor = currentUser?.vendorId
-    ? vendors.find((v) => v.id === currentUser.vendorId) || null
+  const activeVendor = currentUser
+    ? vendors.find(
+        (v) =>
+          (currentUser.vendorId && v.id === currentUser.vendorId) ||
+          (currentUser.email && v.email?.toLowerCase() === currentUser.email.toLowerCase())
+      ) || null
     : null;
 
   const navigateToStore = (slug: string) => {
