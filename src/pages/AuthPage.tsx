@@ -433,7 +433,12 @@ export const AuthPage: React.FC = () => {
           },
         };
 
-        StorageManager.addVendor(newVendor);
+        try {
+          await StorageManager.addVendorAsync(newVendor);
+          console.log('✅ [AuthPage] Vendor record successfully saved to database:', newVendor.id);
+        } catch (vErr) {
+          console.error('❌ [AuthPage] Failed to save vendor record:', vErr);
+        }
 
         createdUser = {
           id: supaUid,
