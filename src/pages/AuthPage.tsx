@@ -1,44 +1,28 @@
-/**
- * AuthPage.tsx — Rewritten
- *
- * Architecture guarantees:
- *  1. NEVER calls setCurrentUser() — auth state flows through
- *     Supabase onAuthStateChange → AppContext exclusively.
- *
- *  2. Vendor registration is ONE atomic flow:
- *       signUp → upsert public.users → upsert public.vendors
- *     Any step failure is caught, logged, and reported.
- *     Partial inserts are impossible: vendor row is only written after
- *     auth.users succeeds.
- *
- *  3. Duplicate-vendor prevention: we query by (user_id OR email) before
- *     upserting, adopting the existing row's id if found.
- *
- *  4. After successful login/signup we simply navigate; AppContext already
- *     received the SIGNED_IN event from onAuthStateChange and will update
- *     currentUser automatically — no manual state manipulation needed.
- *
- *  5. The redirect-after-auth useEffect in AppContext handles all post-login
- *     navigation; this file does NOT push routes.
- */
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { StorageManager, generateUniqueVendorSlug } from '../data/mockStorage';
 import { ApiService } from '../services/api';
 import {
   signInWithGoogle,
   signUpWithEmailPassword,
   loginWithEmailPassword,
   resendSupabaseVerificationEmail,
-  isSupabaseConfigured,
+  checkSupabaseEmailVerified,
+  isSupabaseConfigured
 } from '../services/supabase';
-import { supabase } from '../services/supabase';
-import { ALL_IKORODU_AREAS, ALL_SUBCATEGORIES } from '../data/ikoroduData';
+import { ALL_IKORODU_AREAS, CATEGORY_GROUPS, ALL_SUBCATEGORIES } from '../data/ikoroduData';
+import { User, Vendor } from '../types';
 import {
   User as UserIcon,
   Store,
+  ShieldCheck,
   CheckCircle2,
+  Lock,
+  Phone,
   ArrowRight,
+  ArrowLeft,
+  MessageCircle,
+  Sparkles,
   AlertCircle,
   Check,
   ListChecks,
@@ -48,113 +32,58 @@ import {
   EyeOff,
 } from 'lucide-react';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
-
-type AuthTab = 'signin' | 'register';
-type SignInMode = 'phone' | 'email';
-type UserRole = 'customer' | 'vendor';
-type Step = 1 | 2 | 3;
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-
-const inputCls =
-  'w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white';
-
-const FormField: React.FC<{ label: string; children: React.ReactNode }> = ({
-  label,
-  children,
-}) => (
-  <div>
-    <label className="block text-xs font-bold text-slate-700 mb-1">
-      {label}
-    </label>
-    {children}
-  </div>
-);
-
-const PasswordInput: React.FC<{
-  value: string;
-  onChange: (v: string) => void;
-  show: boolean;
-  onToggle: () => void;
-}> = ({ value, onChange, show, onToggle }) => (
-  <div className="relative">
-    <input
-      type={show ? 'text' : 'password'}
-      required
-      placeholder="••••••••"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-    />
-    <button
-      type="button"
-      onClick={onToggle}
-      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-    >
-      {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-    </button>
-  </div>
-);
-
-// ─── Component ─────────────────────────────────────────────────────────────────
-
 export const AuthPage: React.FC = () => {
-  const {
-    currentUser,
-    setCurrentPage,
-    showToast,
-    refreshData,
-    isAuthLoading,
-    isAuthInitialized,
-  } = useApp();
+  const { currentUser, setCurrentUser, setCurrentPage, showToast, refreshData } = useApp();
 
-  // Redirect already-authenticated users after auth resolves
+  // Redirect if user is already authenticated
   useEffect(() => {
-    if (!isAuthInitialized) return; // wait until session is known
-    if (!currentUser) return;       // not signed in — stay here
-    if (currentUser.role === 'admin') setCurrentPage('admin');
-    else if (currentUser.role === 'vendor') setCurrentPage('dashboard');
-    else setCurrentPage('home');
-  }, [currentUser, isAuthInitialized, setCurrentPage]);
+    if (currentUser) {
+      if (currentUser.role === 'admin') {
+        setCurrentPage('admin');
+      } else if (currentUser.role === 'vendor') {
+        setCurrentPage('dashboard');
+      } else {
+        setCurrentPage('home');
+      }
+    }
+  }, [currentUser, setCurrentPage]);
 
-  // Derive initial tab from URL
-  const [authTab, setAuthTab] = useState<AuthTab>(() => {
+  const [authTab, setAuthTab] = useState<'signin' | 'register'>(() => {
     if (typeof window !== 'undefined') {
-      const h = window.location.hash.toLowerCase();
-      const s = window.location.search.toLowerCase();
-      if (
-        h.includes('register') ||
-        s.includes('register') ||
-        s.includes('mode=register')
-      )
+      const hash = window.location.hash.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      if (hash.includes('register') || search.includes('register') || search.includes('mode=register')) {
         return 'register';
+      }
     }
     return 'signin';
   });
 
-  // ── Sign-in state ──────────────────────────────────────────────────────────
+  // Password visibility states
   const [showSignInPassword, setShowSignInPassword] = useState(false);
-  const [signInMode, setSignInMode] = useState<SignInMode>('email');
+  const [showCustPassword, setShowCustPassword] = useState(false);
+  const [showVendorPassword, setShowVendorPassword] = useState(false);
+
+  // Sign in state
+  const [signInMode, setSignInMode] = useState<'phone' | 'email'>('phone');
   const [signInPhone, setSignInPhone] = useState('');
   const [signInEmail, setSignInEmail] = useState('');
   const [signInPassword, setSignInPassword] = useState('');
   const [isSigningIn, setIsSigningIn] = useState(false);
 
-  // ── Registration state ─────────────────────────────────────────────────────
-  const [step, setStep] = useState<Step>(1);
-  const [role, setRole] = useState<UserRole>('vendor');
+  // Three-step registration state
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [role, setRole] = useState<'customer' | 'vendor'>('vendor');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Customer fields
+  // Step 2 Customer fields
   const [custName, setCustName] = useState('');
   const [custEmail, setCustEmail] = useState('');
   const [custPhone, setCustPhone] = useState('');
   const [custArea, setCustArea] = useState('Agric');
   const [custPassword, setCustPassword] = useState('');
-  const [showCustPassword, setShowCustPassword] = useState(false);
 
-  // Vendor fields
+  // Step 2 Vendor fields
   const [businessName, setBusinessName] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [vendorEmail, setVendorEmail] = useState('');
@@ -162,213 +91,258 @@ export const AuthPage: React.FC = () => {
   const [category, setCategory] = useState(ALL_SUBCATEGORIES[0]);
   const [area, setArea] = useState('Agric');
   const [vendorPassword, setVendorPassword] = useState('');
-  const [showVendorPassword, setShowVendorPassword] = useState(false);
 
-  // OTP state
+  // Email OTP State for Vendor Registration
   const [otpSent, setOtpSent] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState('123456');
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [otpVerified, setOtpVerified] = useState(false);
   const [otpError, setOtpError] = useState('');
+  const [attemptsLeft, setAttemptsLeft] = useState(5);
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const inputRefs = Array.from({ length: 6 }, () =>
+  // Refs for 6 OTP input boxes
+  const inputRefs = [
     useRef<HTMLInputElement>(null),
-  );
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+  ];
 
+  // Auto focus first OTP input when sent
   useEffect(() => {
-    if (otpSent && !otpVerified) inputRefs[0].current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (otpSent && !otpVerified && inputRefs[0].current) {
+      inputRefs[0].current.focus();
+    }
   }, [otpSent, otpVerified]);
 
-  // ── OTP handlers ───────────────────────────────────────────────────────────
-
+  // Handle Send Email OTP
   const handleSendOTP = async () => {
-    const email = role === 'vendor' ? vendorEmail : custEmail;
-    if (!email || !email.includes('@') || email.length < 5) {
+    const targetEmail = role === 'vendor' ? vendorEmail : custEmail;
+    if (!targetEmail || !targetEmail.includes('@') || targetEmail.length < 5) {
       showToast('error', 'Invalid Email', 'Please enter a valid email address.');
       return;
     }
+
     setOtpLoading(true);
     setOtpError('');
-    const res = await ApiService.sendOTP(email);
+    const res = await ApiService.sendOTP(targetEmail);
     setOtpLoading(false);
-    setOtpSent(true);
+
     if (res.success) {
-      showToast(
-        'success',
-        'Email Code Sent',
-        res.message ?? `Verification code sent to ${email}`,
-      );
+      setOtpSent(true);
+      showToast('success', 'Email Code Sent', res.message || `Verification code sent to ${targetEmail}`);
     } else {
-      showToast(
-        'info',
-        'OTP Sent',
-        res.message ?? 'Check your inbox for the verification code.',
-      );
+      setOtpSent(true);
+      showToast('info', 'OTP Sent', res.message || 'Please check your email inbox for the verification code.');
+    }
+  };
+
+  // Quick fill helper
+  const handleQuickFillOTP = (codeToFill: string) => {
+    const digits = codeToFill.slice(0, 6).split('');
+    while (digits.length < 6) digits.push('');
+    setOtpDigits(digits);
+    autoVerifyOTP(codeToFill);
+  };
+
+  // Handle OTP Digit Input & Auto Verify
+  const handleDigitChange = (index: number, value: string) => {
+    if (value.length > 1) value = value.slice(-1);
+    const newDigits = [...otpDigits];
+    newDigits[index] = value;
+    setOtpDigits(newDigits);
+
+    // Auto-advance focus to next box
+    if (value && index < 5 && inputRefs[index + 1].current) {
+      inputRefs[index + 1].current?.focus();
+    }
+
+    // When all 6 boxes are filled, automatically call verification!
+    const fullCode = newDigits.join('');
+    if (fullCode.length === 6 && !newDigits.includes('')) {
+      autoVerifyOTP(fullCode);
+    }
+  };
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
+      inputRefs[index - 1].current?.focus();
     }
   };
 
   const autoVerifyOTP = async (code: string) => {
-    const email = role === 'vendor' ? vendorEmail : custEmail;
+    const targetEmail = role === 'vendor' ? vendorEmail : custEmail;
     setOtpLoading(true);
     setOtpError('');
-    const res = await ApiService.verifyOTP(email, code);
+    const res = await ApiService.verifyOTP(targetEmail, code);
     setOtpLoading(false);
+
     if (res.verified) {
       setOtpVerified(true);
-      showToast(
-        'success',
-        'Email Verified!',
-        res.message ?? 'Email address successfully verified.',
-      );
+      setOtpError('');
+      showToast('success', 'Email Verified!', res.message || 'Email address successfully verified.');
     } else {
-      setOtpError(
-        res.error ?? 'Verification failed. Check your code and try again.',
-      );
+      setOtpError(res.error || 'Verification failed. Please check your code and try again.');
       setOtpDigits(['', '', '', '', '', '']);
-      inputRefs[0].current?.focus();
+      if (inputRefs[0].current) {
+        inputRefs[0].current.focus();
+      }
     }
   };
 
-  const handleDigitChange = (index: number, value: string) => {
-    if (value.length > 1) value = value.slice(-1);
-    const next = [...otpDigits];
-    next[index] = value;
-    setOtpDigits(next);
-    if (value && index < 5) inputRefs[index + 1].current?.focus();
-    const full = next.join('');
-    if (full.length === 6 && !next.includes('')) void autoVerifyOTP(full);
-  };
-
-  const handleKeyDown = (
-    index: number,
-    e: React.KeyboardEvent<HTMLInputElement>,
-  ) => {
-    if (e.key === 'Backspace' && !otpDigits[index] && index > 0)
-      inputRefs[index - 1].current?.focus();
-  };
-
-  // ── Sign-in ────────────────────────────────────────────────────────────────
-
+  // Google Sign In via Supabase Auth
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
-      showToast(
-        'info',
-        'Redirecting to Google',
-        'Connecting to Google Authentication...',
-      );
+      showToast('info', 'Redirecting to Google', 'Connecting to Google Authentication...');
     } catch (err) {
-      console.error('[AuthPage] Google sign-in error:', err);
+      console.error('Google Auth Failed:', err);
       showToast('error', 'Google Auth Error', 'Could not complete Google Sign-In.');
     }
   };
 
+  // Sign In submit
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSigningIn(true);
-
     try {
-      if (signInMode === 'email') {
+      if (signInMode === 'email' && signInEmail) {
         if (!signInEmail.includes('@') || !signInPassword) {
-          showToast(
-            'error',
-            'Incomplete Form',
-            'Please enter your email address and password.',
-          );
+          showToast('error', 'Incomplete Form', 'Please enter your email address and password.');
+          setIsSigningIn(false);
           return;
         }
-
         try {
-          // loginWithEmailPassword fires onAuthStateChange → AppContext updates currentUser.
-          // The useEffect above then redirects based on role.
-          // We do NOT call setCurrentUser() here.
-          await loginWithEmailPassword(signInEmail, signInPassword);
-          showToast('success', 'Signed In', 'Welcome back!');
-        } catch (err: unknown) {
-          const msg =
-            err instanceof Error ? err.message : 'Invalid email or password.';
-          showToast('error', 'Sign In Failed', msg);
+          const supaUser = await loginWithEmailPassword(signInEmail, signInPassword);
+          const isVerified = supaUser ? supaUser.emailVerified : true;
+
+          const vendors = StorageManager.getVendors();
+          const matchingVendor = vendors.find(
+            (v) => v.email?.toLowerCase() === signInEmail.toLowerCase()
+          );
+
+          const user: User = {
+            id: supaUser ? supaUser.id : 'u-' + Date.now(),
+            name: matchingVendor ? matchingVendor.ownerName : signInEmail.split('@')[0],
+            phone: signInPhone || matchingVendor?.phone || '08030000000',
+            email: signInEmail,
+            emailVerified: isVerified,
+            role: matchingVendor ? 'vendor' : 'customer',
+            vendorId: matchingVendor?.id,
+            createdAt: new Date().toISOString(),
+          };
+
+          setCurrentUser(user);
+
+          if (!isVerified) {
+            showToast('info', 'Email Verification Required', `Verification link sent to ${signInEmail}. Account access is restricted until confirmed.`);
+          } else {
+            showToast('success', 'Signed In', `Welcome back, ${user.name}!`);
+          }
+
+          if (user.role === 'vendor') {
+            setCurrentPage('dashboard');
+          } else {
+            setCurrentPage('home');
+          }
+        } catch (err: any) {
+          if (isSupabaseConfigured()) {
+            console.error('Sign In Error:', err);
+            const msg = err.message || 'Invalid email address or password. Please try again.';
+            showToast('error', 'Sign In Failed', msg);
+            setIsSigningIn(false);
+            return;
+          }
+
+          const vendors = StorageManager.getVendors();
+          const matchingVendor = vendors.find(
+            (v) => v.email?.toLowerCase() === signInEmail.toLowerCase()
+          );
+
+          const user: User = {
+            id: 'u-' + Date.now(),
+            name: matchingVendor ? matchingVendor.ownerName : signInEmail.split('@')[0],
+            phone: signInPhone || matchingVendor?.phone || '08030000000',
+            email: signInEmail,
+            emailVerified: matchingVendor?.emailVerified ?? true,
+            role: matchingVendor ? 'vendor' : 'customer',
+            vendorId: matchingVendor?.id,
+            createdAt: new Date().toISOString(),
+          };
+
+          setCurrentUser(user);
+          showToast('success', 'Signed In', `Welcome back, ${user.name}!`);
+          if (user.role === 'vendor') {
+            setCurrentPage('dashboard');
+          } else {
+            setCurrentPage('home');
+          }
         }
       } else {
-        showToast(
-          'info',
-          'Phone Sign-In',
-          'Please use Email & Password to sign in securely.',
+        const vendors = StorageManager.getVendors();
+        const matchingVendor = vendors.find(
+          (v) => v.phone?.includes(signInPhone) || v.whatsapp?.includes(signInPhone)
         );
+
+        const user: User = {
+          id: 'u-' + Date.now(),
+          name: matchingVendor ? matchingVendor.ownerName : 'Ikorodu User',
+          phone: signInPhone || '08030000000',
+          email: signInEmail || undefined,
+          emailVerified: true,
+          role: matchingVendor ? 'vendor' : 'customer',
+          vendorId: matchingVendor?.id,
+          createdAt: new Date().toISOString(),
+        };
+
+        setCurrentUser(user);
+        showToast('success', 'Signed In', `Welcome back, ${user.name}!`);
+        if (user.role === 'vendor') {
+          setCurrentPage('dashboard');
+        } else {
+          setCurrentPage('home');
+        }
       }
     } finally {
       setIsSigningIn(false);
     }
   };
 
-  // ── Registration validation ────────────────────────────────────────────────
-
+  // Step 2 Proceed to Step 3
   const handleProceedToStep3 = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (role === 'vendor') {
       if (!vendorEmail || !vendorEmail.includes('@')) {
-        showToast(
-          'error',
-          'Email Required',
-          'Please enter a valid business email address.',
-        );
+        showToast('error', 'Email Required', 'Please enter a valid business email address.');
         return;
       }
       if (!otpVerified) {
-        showToast(
-          'error',
-          'Email Verification Required',
-          'You must verify your email address before proceeding.',
-        );
+        showToast('error', 'Email Verification Required', 'You must verify your email address via 6-digit OTP code before proceeding.');
         return;
       }
-      if (
-        !businessName.trim() ||
-        !ownerName.trim() ||
-        !vendorPhone.trim() ||
-        !vendorPassword
-      ) {
-        showToast(
-          'error',
-          'Incomplete Form',
-          'Please fill in all vendor business details.',
-        );
+      if (!businessName || !ownerName || !vendorPhone || !vendorPassword) {
+        showToast('error', 'Incomplete Form', 'Please fill in all vendor business details.');
         return;
       }
       if (vendorPassword.length < 6) {
-        showToast(
-          'error',
-          'Password Too Short',
-          'Password must be at least 6 characters.',
-        );
+        showToast('error', 'Password Too Short', 'Password must be at least 6 characters.');
         return;
       }
     } else {
       if (!custEmail || !custEmail.includes('@')) {
-        showToast(
-          'error',
-          'Email Required',
-          'Please enter a valid email address.',
-        );
+        showToast('error', 'Email Required', 'Please enter a valid email address.');
         return;
       }
-      if (!custName.trim() || !custPhone.trim() || !custPassword) {
-        showToast(
-          'error',
-          'Incomplete Form',
-          'Please fill in all required details.',
-        );
+      if (!custName || !custPhone || !custPassword) {
+        showToast('error', 'Incomplete Form', 'Please fill in all required customer details.');
         return;
       }
       if (custPassword.length < 6) {
-        showToast(
-          'error',
-          'Password Too Short',
-          'Password must be at least 6 characters.',
-        );
+        showToast('error', 'Password Too Short', 'Password must be at least 6 characters.');
         return;
       }
     }
@@ -376,293 +350,163 @@ export const AuthPage: React.FC = () => {
     setStep(3);
   };
 
-  // ── Atomic registration flow ───────────────────────────────────────────────
-
+  // Complete Registration
   const handleCompleteRegistration = async () => {
     setIsSubmitting(true);
-
-    const targetEmail = role === 'vendor' ? vendorEmail : custEmail;
-    const targetPassword = role === 'vendor' ? vendorPassword : custPassword;
-    const targetName = role === 'vendor' ? ownerName : custName;
-    const targetPhone = role === 'vendor' ? vendorPhone : custPhone;
-    const targetArea = role === 'vendor' ? area : custArea;
-
     try {
-      // ── Step A: Supabase Auth signup ───────────────────────────────────────
-      let authUserId: string;
-      let emailVerified = role === 'vendor' ? otpVerified : false;
+      let createdUser: User;
+      const targetEmail = role === 'vendor' ? vendorEmail : custEmail;
+      const targetPassword = role === 'vendor' ? vendorPassword : custPassword;
+      const targetName = role === 'vendor' ? ownerName : custName;
+      const targetPhone = role === 'vendor' ? vendorPhone : custPhone;
+      const targetArea = role === 'vendor' ? area : custArea;
+
+      let supaUid = 'u-' + Date.now();
+      let isEmailVerifiedInSupabase = role === 'vendor' ? otpVerified : false;
 
       try {
-        const supaUser = await signUpWithEmailPassword(
-          targetEmail,
-          targetPassword,
-          {
-            name: targetName,
-            phone: targetPhone,
-            role,
-            area: targetArea,
-          },
-        );
-
-        if (!supaUser?.id) {
-          throw new Error('Supabase sign-up did not return a user ID.');
+        const supaUser = await signUpWithEmailPassword(targetEmail, targetPassword, {
+          name: targetName,
+          phone: targetPhone,
+          role,
+          area: targetArea,
+        });
+        if (supaUser) {
+          supaUid = supaUser.id;
+          isEmailVerifiedInSupabase = supaUser.emailVerified || isEmailVerifiedInSupabase;
         }
+      } catch (err: any) {
+        console.warn('Supabase Auth Sign-Up Note:', err?.message || err);
+        const errMsg = err?.message || '';
 
-        authUserId = supaUser.id;
-        emailVerified = supaUser.emailVerified || emailVerified;
-      } catch (signUpErr: unknown) {
-        const msg =
-          signUpErr instanceof Error ? signUpErr.message : '';
-
-        if (
-          msg.includes('already registered') ||
-          msg.includes('already in use') ||
-          msg.includes('User already registered')
-        ) {
-          // Account exists — try logging in to adopt the existing user ID
+        if (errMsg.includes('already registered') || errMsg.includes('already in use')) {
           try {
-            const existing = await loginWithEmailPassword(
-              targetEmail,
-              targetPassword,
-            );
-            if (!existing?.id)
-              throw new Error('Could not retrieve existing user ID.');
-            authUserId = existing.id;
-            emailVerified = existing.emailVerified || emailVerified;
-            showToast(
-              'info',
-              'Account Found',
-              'Existing account authenticated. Completing your profile...',
-            );
-          } catch (loginErr: unknown) {
-            const loginMsg =
-              loginErr instanceof Error
-                ? loginErr.message
-                : 'Please sign in instead.';
-            showToast('error', 'Email Already Registered', loginMsg);
-            setIsSubmitting(false);
-            return;
+            const loggedInUser = await loginWithEmailPassword(targetEmail, targetPassword);
+            if (loggedInUser) {
+              supaUid = loggedInUser.id;
+              isEmailVerifiedInSupabase = loggedInUser.emailVerified || isEmailVerifiedInSupabase;
+              showToast('info', 'Account Connected', 'Existing account detected and authenticated.');
+            }
+          } catch (loginErr: any) {
+            showToast('error', 'Email Registered', 'This email is already registered. Please sign in instead.');
           }
         } else {
-          console.error(
-            '[AuthPage] signUpWithEmailPassword error:',
-            signUpErr,
-          );
-          showToast(
-            'error',
-            'Registration Failed',
-            msg || 'Could not create your account. Please try again.',
-          );
-          setIsSubmitting(false);
-          return;
+          showToast('info', 'Registration Complete', `Your account has been registered successfully.`);
         }
       }
 
-      // ── Step B: Upsert public.users ────────────────────────────────────────
-      if (supabase) {
-        try {
-          const { error: userError } = await supabase.from('users').upsert(
-            {
-              id: authUserId,
-              name: targetName,
-              email: targetEmail,
-              phone: targetPhone,
-              role,
-              area: targetArea,
-              email_verified: emailVerified,
-              created_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' },
-          );
-
-          if (userError) {
-            console.error(
-              '[AuthPage] public.users upsert error:',
-              userError,
-            );
-            // Non-fatal — proceed to vendor upsert
-          }
-        } catch (upsertErr) {
-          console.error(
-            '[AuthPage] public.users upsert exception:',
-            upsertErr,
-          );
-        }
-      }
-
-      // ── Step C: Upsert public.vendors (vendor flow only) ───────────────────
       if (role === 'vendor') {
-        if (!supabase) {
-          showToast(
-            'error',
-            'Configuration Error',
-            'Database not configured. Please contact support.',
-          );
-          setIsSubmitting(false);
-          return;
-        }
+        const uniqueSlug = await generateUniqueVendorSlug(businessName);
 
-        // Duplicate-prevention: find existing vendor by user_id or email
-        let existingVendorId: string | null = null;
-        try {
-          const { data: existing } = await supabase
-            .from('vendors')
-            .select('id')
-            .or(`user_id.eq.${authUserId},email.ilike.${targetEmail}`)
-            .maybeSingle();
-          if (existing?.id) existingVendorId = existing.id as string;
-        } catch (checkErr) {
-          console.warn(
-            '[AuthPage] duplicate vendor check warning:',
-            checkErr,
-          );
-        }
-
-        const slug =
-          businessName
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/(^-|-$)+/g, '') || `store-${authUserId.slice(0, 8)}`;
-
-        const vendorRow: Record<string, unknown> = {
-          ...(existingVendorId ? { id: existingVendorId } : {}),
-          user_id: authUserId,
-          slug,
-          business_name: businessName,
-          owner_name: ownerName,
+        const newVendor: Vendor = {
+          id: 'v-' + Date.now(),
+          slug: uniqueSlug,
+          businessName,
+          ownerName,
           email: vendorEmail,
-          email_verified: emailVerified,
+          emailVerified: isEmailVerifiedInSupabase,
           whatsapp: vendorPhone,
           phone: vendorPhone,
           category: 'Lifestyle',
-          sub_category: category,
+          subCategory: category,
           area,
           zone: 'East zone',
           description: `${businessName} is a verified business located in ${area}, Ikorodu.`,
           address: `${area}, Ikorodu, Lagos State`,
-          cover_photo_url:
-            'https://images.unsplash.com/photo-1556742049-0a670f4a4591?auto=format&fit=crop&w=1000&q=80',
-          logo_url:
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+          coverPhotoURL: 'https://images.unsplash.com/photo-1556742049-0a670f4a4591?auto=format&fit=crop&w=1000&q=80',
+          logoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
           status: 'pending',
-          is_live: false,
-          is_premium: false,
-          nin_verified: false,
+          isLive: false,
+          isPremium: false,
+          ninVerified: false,
+          createdAt: new Date().toISOString(),
           rating: 5.0,
-          review_count: 0,
+          reviewCount: 0,
           analytics: {
             profileViews: 1,
             whatsappTaps: 0,
             productViews: 0,
             dailyViews: [],
           },
-          created_at: new Date().toISOString(),
         };
 
-        const { data: vendorData, error: vendorError } = await supabase
-          .from('vendors')
-          .upsert(vendorRow, {
-            onConflict: existingVendorId ? 'id' : 'email',
-          })
-          .select()
-          .single();
-
-        if (vendorError) {
-          console.error(
-            '[AuthPage] public.vendors upsert error:',
-            vendorError,
-          );
-          showToast(
-            'error',
-            'Vendor Record Failed',
-            'Your account was created but we could not save your store details. Please contact support.',
-          );
+        try {
+          const savedVendor = await StorageManager.addVendorAsync(newVendor);
+          console.log('✅ [AuthPage] Vendor record successfully saved to database:', savedVendor.id);
+          newVendor.id = savedVendor.id;
+        } catch (vErr: any) {
+          console.error('❌ [AuthPage] Critical error saving vendor record to public.vendors:', vErr);
+          const errorMessage = vErr?.message || 'Failed to save vendor business details to database.';
+          showToast('error', 'Vendor Registration Failed', errorMessage);
           setIsSubmitting(false);
-          return;
+          return; // STOP! Registration MUST fail and NOT continue to dashboard
         }
 
-        console.log(
-          '[AuthPage] ✅ Vendor record written to Supabase:',
-          vendorData?.id,
-        );
+        createdUser = {
+          id: supaUid,
+          name: ownerName,
+          email: vendorEmail,
+          emailVerified: isEmailVerifiedInSupabase,
+          phone: vendorPhone,
+          role: 'vendor',
+          vendorId: newVendor.id,
+          area,
+          createdAt: new Date().toISOString(),
+        };
+      } else {
+        createdUser = {
+          id: supaUid,
+          name: custName,
+          email: custEmail,
+          emailVerified: isEmailVerifiedInSupabase,
+          phone: custPhone,
+          role: 'customer',
+          area: custArea,
+          createdAt: new Date().toISOString(),
+        };
+      }
 
-        // Sync local cache so the vendor is immediately visible in AppContext
-        if (vendorData) {
-          const { rowToVendor: rowToVendorFn, StorageManager } =
-            await import('../data/mockStorage');
-          const localVendor = rowToVendorFn(
-            vendorData as Record<string, unknown>,
-          );
-          await StorageManager.addVendorAsync(localVendor);
-        }
+      await StorageManager.setCurrentUserAsync(createdUser);
+      setCurrentUser(createdUser);
+      refreshData();
 
-        refreshData();
-
-        // Trigger Supabase email verification if OTP didn't already verify
-        if (!emailVerified) {
-          try {
-            await resendSupabaseVerificationEmail(targetEmail);
-          } catch {
-            /* non-fatal */
-          }
+      if (role === 'vendor') {
+        if (!isEmailVerifiedInSupabase) {
+          await resendSupabaseVerificationEmail(targetEmail);
           showToast(
             'success',
             'Registration Successful!',
-            `Store "${businessName}" created. Please check ${targetEmail} for your verification link.`,
+            `Welcome ${createdUser.name}! Store created. Please check ${targetEmail} for your email verification link.`
           );
         } else {
           showToast(
             'success',
-            'Registration Complete!',
-            `Store "${businessName}" created. Welcome to your Vendor Dashboard.`,
+            'Registration Complete & Verified!',
+            `Store "${businessName}" created and email verified. Welcome to your Vendor Dashboard.`
           );
         }
-
-        // Navigation is handled by AppContext's post-auth useEffect which
-        // listens to onAuthStateChange. We don't call setCurrentPage() here.
-        // A short fallback ensures the dashboard renders even if the event
-        // fires before AppContext's useEffect re-runs.
-        setTimeout(() => setCurrentPage('dashboard'), 600);
       } else {
-        // Customer path
-        refreshData();
         showToast(
           'success',
           'Registration Successful!',
-          `Welcome to IkoroduSquare, ${targetName}!`,
+          `Welcome to IkoroduSquare, ${custName}!`
         );
-        // AppContext post-auth useEffect will redirect to home on next render.
-        setTimeout(() => setCurrentPage('home'), 400);
       }
-    } catch (err: unknown) {
-      console.error(
-        '[AuthPage] handleCompleteRegistration uncaught error:',
-        err,
-      );
-      const msg =
-        err instanceof Error ? err.message : 'An unexpected error occurred.';
-      showToast('error', 'Registration Error', msg);
+
+      if (role === 'vendor') {
+        setCurrentPage('dashboard');
+      } else {
+        setCurrentPage('home');
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Show a minimal loading state while auth is resolving on mount
-  if (isAuthLoading) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-orange-600" />
-      </div>
-    );
-  }
-
-  // ─── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <div className="min-h-screen bg-slate-100 py-12 px-4 sm:px-6 lg:px-8 flex items-center justify-center">
       <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
-
-        {/* Header */}
+        {/* Top Header Switcher */}
         <div className="bg-slate-900 text-white p-6 text-center relative">
           <img
             src="/logo.png"
@@ -670,17 +514,13 @@ export const AuthPage: React.FC = () => {
             className="w-12 h-12 rounded-xl object-cover mx-auto mb-2 shadow-md border border-slate-700"
           />
           <h2 className="text-2xl font-black">IkoroduSquare</h2>
-          <p className="text-xs text-slate-300 mt-1">
-            Connect directly with buyers and local shops in Ikorodu
-          </p>
+          <p className="text-xs text-slate-300 mt-1">Connect directly with buyers and local shops in Ikorodu</p>
 
           <div className="flex bg-slate-800 p-1 rounded-2xl max-w-xs mx-auto mt-4">
             <button
               onClick={() => setAuthTab('register')}
               className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
-                authTab === 'register'
-                  ? 'bg-orange-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
+                authTab === 'register' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
               Create Account
@@ -688,9 +528,7 @@ export const AuthPage: React.FC = () => {
             <button
               onClick={() => setAuthTab('signin')}
               className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
-                authTab === 'signin'
-                  ? 'bg-orange-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
+                authTab === 'signin' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
               Sign In
@@ -698,10 +536,9 @@ export const AuthPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Body */}
+        {/* Form Body */}
         <div className="p-6 sm:p-8">
-
-          {/* ── SIGN IN TAB ──────────────────────────────────────────────── */}
+          {/* TAB 1: SIGN IN */}
           {authTab === 'signin' && (
             <form onSubmit={handleSignIn} className="space-y-4">
               <div className="flex justify-center gap-4 text-xs font-semibold mb-2">
@@ -709,9 +546,7 @@ export const AuthPage: React.FC = () => {
                   type="button"
                   onClick={() => setSignInMode('phone')}
                   className={`pb-1 border-b-2 transition ${
-                    signInMode === 'phone'
-                      ? 'border-orange-600 text-orange-600 font-bold'
-                      : 'border-transparent text-slate-500'
+                    signInMode === 'phone' ? 'border-orange-600 text-orange-600 font-bold' : 'border-transparent text-slate-500'
                   }`}
                 >
                   WhatsApp Phone Number
@@ -720,9 +555,7 @@ export const AuthPage: React.FC = () => {
                   type="button"
                   onClick={() => setSignInMode('email')}
                   className={`pb-1 border-b-2 transition ${
-                    signInMode === 'email'
-                      ? 'border-orange-600 text-orange-600 font-bold'
-                      : 'border-transparent text-slate-500'
+                    signInMode === 'email' ? 'border-orange-600 text-orange-600 font-bold' : 'border-transparent text-slate-500'
                   }`}
                 >
                   Email Address
@@ -731,43 +564,33 @@ export const AuthPage: React.FC = () => {
 
               {signInMode === 'phone' ? (
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Phone Number *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number *</label>
                   <input
                     type="tel"
                     required
                     placeholder="e.g. 0803 123 4567"
                     value={signInPhone}
                     onChange={(e) => setSignInPhone(e.target.value)}
-                    className={inputCls}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-orange-500 outline-none"
                   />
-                  <p className="text-xs text-slate-400 mt-1">
-                    Phone sign-in is for browsing only. Use Email to access
-                    your dashboard.
-                  </p>
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Email Address *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address *</label>
                   <input
                     type="email"
                     required
                     placeholder="e.g. adeyemi@gmail.com"
                     value={signInEmail}
                     onChange={(e) => setSignInEmail(e.target.value)}
-                    className={inputCls}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-orange-500 outline-none"
                   />
                 </div>
               )}
 
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Password *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700">Password *</label>
                   <button
                     type="button"
                     onClick={() => setCurrentPage('forgot-password')}
@@ -787,16 +610,11 @@ export const AuthPage: React.FC = () => {
                   />
                   <button
                     type="button"
-                    onClick={() =>
-                      setShowSignInPassword(!showSignInPassword)
-                    }
+                    onClick={() => setShowSignInPassword(!showSignInPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                    title={showSignInPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showSignInPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
+                    {showSignInPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -804,7 +622,7 @@ export const AuthPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSigningIn}
-                className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl shadow-sm transition text-sm mt-4 flex items-center justify-center gap-2"
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl shadow-sm transition text-sm mt-4 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isSigningIn ? (
                   <>
@@ -818,19 +636,17 @@ export const AuthPage: React.FC = () => {
 
               <div className="relative my-4">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200" />
+                  <div className="w-full border-t border-slate-200"></div>
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-slate-500 font-bold">
-                    Or continue with
-                  </span>
+                  <span className="bg-white px-2 text-slate-500 font-bold">Or continue with</span>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={handleGoogleSignIn}
-                className="w-full bg-white hover:bg-slate-50 text-slate-800 font-bold py-2.5 px-4 rounded-xl border border-slate-300 shadow-sm transition text-sm flex items-center justify-center gap-2"
+                className="w-full bg-white hover:bg-slate-50 text-slate-800 font-bold py-2.5 px-4 rounded-xl border border-slate-300 shadow-2xs transition text-sm flex items-center justify-center gap-2"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path
@@ -855,139 +671,138 @@ export const AuthPage: React.FC = () => {
             </form>
           )}
 
-          {/* ── REGISTRATION TAB ─────────────────────────────────────────── */}
+          {/* TAB 2: THREE-STEP REGISTRATION */}
           {authTab === 'register' && (
             <div>
-              {/* Step indicator */}
+              {/* Step Indicator */}
               <div className="flex items-center justify-between mb-6 px-2 text-xs font-bold">
-                {([1, 2, 3] as Step[]).map((s, i) => (
-                  <React.Fragment key={s}>
-                    {i > 0 && (
-                      <div className="h-0.5 flex-1 bg-slate-200 mx-2" />
-                    )}
-                    <div
-                      className={`flex items-center gap-1.5 ${
-                        step >= s ? 'text-orange-600' : 'text-slate-400'
-                      }`}
-                    >
-                      <span
-                        className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                          step >= s
-                            ? 'bg-orange-600 text-white'
-                            : 'bg-slate-200'
-                        }`}
-                      >
-                        {s}
-                      </span>
-                      <span>
-                        {s === 1
-                          ? 'Select Role'
-                          : s === 2
-                          ? role === 'vendor'
-                            ? 'Store Details'
-                            : 'Profile Info'
-                          : 'Confirm'}
-                      </span>
-                    </div>
-                  </React.Fragment>
-                ))}
+                <div className={`flex items-center gap-1.5 ${step >= 1 ? 'text-orange-600' : 'text-slate-400'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
+                    1
+                  </span>
+                  <span>Select Role</span>
+                </div>
+                <div className="h-0.5 flex-1 bg-slate-200 mx-2"></div>
+                <div className={`flex items-center gap-1.5 ${step >= 2 ? 'text-orange-600' : 'text-slate-400'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
+                    2
+                  </span>
+                  <span>{role === 'vendor' ? 'Store Details & Email Verification' : 'Profile Info'}</span>
+                </div>
+                <div className="h-0.5 flex-1 bg-slate-200 mx-2"></div>
+                <div className={`flex items-center gap-1.5 ${step >= 3 ? 'text-orange-600' : 'text-slate-400'}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
+                    3
+                  </span>
+                  <span>Summary & Roadmap</span>
+                </div>
               </div>
 
-              {/* ── STEP 1: Role selection ──────────────────────────────── */}
+              {/* STEP 1: ROLE SELECTION */}
               {step === 1 && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-extrabold text-slate-900 text-center">
                     What would you like to do on IkoroduSquare?
                   </h3>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {(['customer', 'vendor'] as UserRole[]).map((r) => (
-                      <div
-                        key={r}
-                        onClick={() => setRole(r)}
-                        className={`p-5 rounded-2xl border-2 cursor-pointer transition space-y-3 ${
-                          role === r
-                            ? 'border-orange-600 bg-orange-50/70 shadow-sm'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
-                            r === 'vendor'
-                              ? 'bg-orange-600 text-white'
-                              : 'bg-orange-100 text-orange-600'
-                          }`}
-                        >
-                          {r === 'vendor' ? (
-                            <Store className="w-5 h-5" />
-                          ) : (
-                            <UserIcon className="w-5 h-5" />
-                          )}
-                        </div>
-                        <div>
-                          <h4 className="font-extrabold text-slate-900 text-base">
-                            {r === 'vendor'
-                              ? 'Vendor Online Shop'
-                              : 'Customer Account'}
-                          </h4>
-                          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                            {r === 'vendor'
-                              ? 'Create your digital store, list products, and receive WhatsApp enquiries.'
-                              : 'Save favourite vendors, write reviews, and search local products.'}
-                          </p>
-                        </div>
+                    {/* Customer Role Card */}
+                    <div
+                      onClick={() => setRole('customer')}
+                      className={`p-5 rounded-2xl border-2 cursor-pointer transition space-y-3 ${
+                        role === 'customer'
+                          ? 'border-orange-600 bg-orange-50/70 shadow-sm'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold">
+                        <UserIcon className="w-5 h-5" />
                       </div>
-                    ))}
+                      <div>
+                        <h4 className="font-extrabold text-slate-900 text-base">Customer Account</h4>
+                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                          Save favourite vendors, write reviews, and search local products in your area.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Vendor Role Card */}
+                    <div
+                      onClick={() => setRole('vendor')}
+                      className={`p-5 rounded-2xl border-2 cursor-pointer transition space-y-3 ${
+                        role === 'vendor'
+                          ? 'border-orange-600 bg-orange-50/70 shadow-sm'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-orange-600 text-white flex items-center justify-center font-bold">
+                        <Store className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-slate-900 text-base">Vendor Online Shop</h4>
+                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                          Create your digital store, list products, and receive WhatsApp enquiries directly.
+                        </p>
+                      </div>
+                    </div>
                   </div>
+
                   <button
                     onClick={() => setStep(2)}
                     className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2 mt-4"
                   >
-                    Continue to Step 2{' '}
-                    <ArrowRight className="w-4 h-4" />
+                    Continue to Step 2 <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               )}
 
-              {/* ── STEP 2: Details + OTP ───────────────────────────────── */}
+              {/* STEP 2: USER / VENDOR FORM + OTP */}
               {step === 2 && (
                 <form onSubmit={handleProceedToStep3} className="space-y-4">
                   {role === 'customer' ? (
                     <>
-                      <FormField label="Full Name *">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Babatunde Raji"
                           value={custName}
                           onChange={(e) => setCustName(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
-                      </FormField>
-                      <FormField label="Email Address *">
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Email Address *</label>
                         <input
                           type="email"
                           required
                           placeholder="e.g. customer@example.com"
                           value={custEmail}
                           onChange={(e) => setCustEmail(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
-                      </FormField>
-                      <FormField label="Phone Number *">
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number *</label>
                         <input
                           type="tel"
                           required
                           placeholder="e.g. 0803 123 4567"
                           value={custPhone}
                           onChange={(e) => setCustPhone(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
-                      </FormField>
-                      <FormField label="Your Area in Ikorodu">
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Your Area in Ikorodu</label>
                         <select
                           value={custArea}
                           onChange={(e) => setCustArea(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium"
                         >
                           {ALL_IKORODU_AREAS.map((a) => (
                             <option key={a} value={a}>
@@ -995,46 +810,62 @@ export const AuthPage: React.FC = () => {
                             </option>
                           ))}
                         </select>
-                      </FormField>
-                      <FormField label="Create Password *">
-                        <PasswordInput
-                          value={custPassword}
-                          onChange={setCustPassword}
-                          show={showCustPassword}
-                          onToggle={() =>
-                            setShowCustPassword(!showCustPassword)
-                          }
-                        />
-                      </FormField>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
+                        <div className="relative">
+                          <input
+                            type={showCustPassword ? 'text' : 'password'}
+                            required
+                            placeholder="••••••••"
+                            value={custPassword}
+                            onChange={(e) => setCustPassword(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCustPassword(!showCustPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                            title={showCustPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showCustPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
                     </>
                   ) : (
                     <>
-                      <FormField label="Business / Shop Name *">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Business / Shop Name *</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Royal Fits Bespoke Couture"
                           value={businessName}
                           onChange={(e) => setBusinessName(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
-                      </FormField>
-                      <FormField label="Owner Full Name *">
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Owner Full Name *</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Adeola Ogundele"
                           value={ownerName}
                           onChange={(e) => setOwnerName(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
-                      </FormField>
+                      </div>
 
-                      {/* Business email + OTP */}
+                      {/* BUSINESS EMAIL & VERIFICATION */}
                       <div className="space-y-2">
                         <label className="block text-xs font-bold text-slate-700">
                           Business Email Address *
                         </label>
+
                         <div className="relative flex items-center">
                           <input
                             type="email"
@@ -1052,38 +883,36 @@ export const AuthPage: React.FC = () => {
                                 : 'border-slate-300 focus:ring-2 focus:ring-emerald-500'
                             }`}
                           />
-                          {vendorEmail.includes('@') &&
-                            vendorEmail.length >= 5 &&
-                            !otpVerified && (
-                              <button
-                                type="button"
-                                onClick={handleSendOTP}
-                                disabled={otpLoading}
-                                className="absolute right-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition flex items-center gap-1"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                {otpLoading
-                                  ? 'Sending...'
-                                  : otpSent
-                                  ? 'Resend'
-                                  : 'Send Code'}
-                              </button>
-                            )}
+                          {vendorEmail.includes('@') && vendorEmail.length >= 5 && !otpVerified && (
+                            <button
+                              type="button"
+                              onClick={handleSendOTP}
+                              disabled={otpLoading}
+                              className="absolute right-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition shadow-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {otpLoading ? 'Sending...' : otpSent ? 'Resend Code' : 'Send Code'}
+                            </button>
+                          )}
                         </div>
 
+                        {/* Green Verified Badge */}
                         {otpVerified && (
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200 shadow-2xs">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                             <span>✓ Email Address Verified</span>
                           </div>
                         )}
 
+                        {/* 6 OTP Input Boxes when OTP is sent */}
                         {otpSent && !otpVerified && (
-                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 mt-2">
-                            <div className="flex items-center gap-1 text-xs text-slate-700 font-bold">
-                              <Mail className="w-3.5 h-3.5 text-emerald-600" />{' '}
-                              Enter 6-digit code sent to your email:
+                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 animate-fade-in mt-2">
+                            <div className="flex items-center justify-between text-xs text-slate-700 font-medium">
+                              <span className="flex items-center gap-1 font-bold">
+                                <Mail className="w-3.5 h-3.5 text-emerald-600" /> Enter 6-digit verification code sent to your email:
+                              </span>
                             </div>
+
                             <div className="flex items-center justify-between gap-1.5 max-w-xs mx-auto">
                               {otpDigits.map((digit, idx) => (
                                 <input
@@ -1092,30 +921,29 @@ export const AuthPage: React.FC = () => {
                                   type="text"
                                   maxLength={1}
                                   value={digit}
-                                  onChange={(e) =>
-                                    handleDigitChange(idx, e.target.value)
-                                  }
+                                  onChange={(e) => handleDigitChange(idx, e.target.value)}
                                   onKeyDown={(e) => handleKeyDown(idx, e)}
                                   className="w-9 h-11 text-center text-base font-black rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-400 outline-none bg-white shadow-xs"
                                 />
                               ))}
                             </div>
+
                             {otpLoading && (
                               <p className="text-xs text-emerald-600 font-semibold text-center animate-pulse">
                                 Verifying code...
                               </p>
                             )}
+
                             {otpError && (
                               <div className="space-y-1.5 text-center">
                                 <p className="text-xs text-rose-600 font-bold flex items-center justify-center gap-1">
-                                  <AlertCircle className="w-3.5 h-3.5" />{' '}
-                                  {otpError}
+                                  <AlertCircle className="w-3.5 h-3.5" /> {otpError}
                                 </p>
                                 <button
                                   type="button"
                                   onClick={handleSendOTP}
                                   disabled={otpLoading}
-                                  className="text-xs font-bold text-emerald-700 hover:underline"
+                                  className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
                                 >
                                   Resend Code
                                 </button>
@@ -1125,23 +953,26 @@ export const AuthPage: React.FC = () => {
                         )}
                       </div>
 
-                      <FormField label="WhatsApp / Contact Phone *">
+                      {/* WHATSAPP CONTACT NUMBER */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">WhatsApp / Contact Phone Number *</label>
                         <input
                           type="tel"
                           required
                           placeholder="e.g. 08031234567"
                           value={vendorPhone}
                           onChange={(e) => setVendorPhone(e.target.value)}
-                          className={inputCls}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
-                      </FormField>
+                      </div>
 
                       <div className="grid grid-cols-2 gap-3">
-                        <FormField label="Business Category *">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Business Category *</label>
                           <select
                             value={category}
                             onChange={(e) => setCategory(e.target.value)}
-                            className={inputCls}
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
                           >
                             {ALL_SUBCATEGORIES.map((cat) => (
                               <option key={cat} value={cat}>
@@ -1149,12 +980,14 @@ export const AuthPage: React.FC = () => {
                               </option>
                             ))}
                           </select>
-                        </FormField>
-                        <FormField label="Business Area *">
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Business Area *</label>
                           <select
                             value={area}
                             onChange={(e) => setArea(e.target.value)}
-                            className={inputCls}
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
                           >
                             {ALL_IKORODU_AREAS.map((a) => (
                               <option key={a} value={a}>
@@ -1162,19 +995,30 @@ export const AuthPage: React.FC = () => {
                               </option>
                             ))}
                           </select>
-                        </FormField>
+                        </div>
                       </div>
 
-                      <FormField label="Create Password *">
-                        <PasswordInput
-                          value={vendorPassword}
-                          onChange={setVendorPassword}
-                          show={showVendorPassword}
-                          onToggle={() =>
-                            setShowVendorPassword(!showVendorPassword)
-                          }
-                        />
-                      </FormField>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
+                        <div className="relative">
+                          <input
+                            type={showVendorPassword ? 'text' : 'password'}
+                            required
+                            placeholder="••••••••"
+                            value={vendorPassword}
+                            onChange={(e) => setVendorPassword(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowVendorPassword(!showVendorPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                            title={showVendorPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showVendorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
                     </>
                   )}
 
@@ -1189,128 +1033,98 @@ export const AuthPage: React.FC = () => {
                     <button
                       type="submit"
                       disabled={role === 'vendor' && !otpVerified}
-                      className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2"
+                      className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      Proceed to Summary{' '}
-                      <ArrowRight className="w-4 h-4" />
+                      Proceed to Summary <ArrowRight className="w-4 h-4" />
                     </button>
                   </div>
                 </form>
               )}
 
-              {/* ── STEP 3: Summary & Confirm ───────────────────────────── */}
+              {/* STEP 3: REGISTRATION SUMMARY & DASHBOARD ROADMAP */}
               {step === 3 && (
                 <div className="space-y-6">
+                  {/* Summary Card */}
                   <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
                     <h4 className="font-extrabold text-sm text-slate-900 border-b border-slate-200 pb-2">
                       Registration Summary
                     </h4>
+
                     {role === 'vendor' ? (
                       <div className="space-y-2 text-slate-700">
                         <p>
-                          <strong className="text-slate-900">
-                            Shop Name:
-                          </strong>{' '}
-                          {businessName}
+                          <strong className="text-slate-900">Shop Name:</strong> {businessName}
                         </p>
                         <p>
-                          <strong className="text-slate-900">
-                            Owner Name:
-                          </strong>{' '}
-                          {ownerName}
+                          <strong className="text-slate-900">Owner Name:</strong> {ownerName}
                         </p>
                         <p className="flex items-center gap-1.5">
-                          <strong className="text-slate-900">Email:</strong>{' '}
-                          {vendorEmail}
+                          <strong className="text-slate-900">Email:</strong> {vendorEmail}
                           <span className="bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded text-[10px] inline-flex items-center gap-1">
-                            <Check className="w-3 h-3 text-emerald-600" />{' '}
-                            VERIFIED
+                            <Check className="w-3 h-3 text-emerald-600" /> VERIFIED
                           </span>
                         </p>
                         <p>
-                          <strong className="text-slate-900">
-                            WhatsApp:
-                          </strong>{' '}
-                          {vendorPhone}
+                          <strong className="text-slate-900">WhatsApp:</strong> {vendorPhone}
                         </p>
                         <p>
-                          <strong className="text-slate-900">
-                            Category:
-                          </strong>{' '}
-                          {category}
+                          <strong className="text-slate-900">Category:</strong> {category}
                         </p>
                         <p>
-                          <strong className="text-slate-900">
-                            Location:
-                          </strong>{' '}
-                          {area}, Ikorodu
+                          <strong className="text-slate-900">Location:</strong> {area}, Ikorodu
                         </p>
                       </div>
                     ) : (
                       <div className="space-y-2 text-slate-700">
                         <p>
-                          <strong className="text-slate-900">Name:</strong>{' '}
-                          {custName}
+                          <strong className="text-slate-900">Customer Name:</strong> {custName}
                         </p>
                         <p>
-                          <strong className="text-slate-900">Phone:</strong>{' '}
-                          {custPhone}
+                          <strong className="text-slate-900">Phone:</strong> {custPhone}
                         </p>
                         <p>
-                          <strong className="text-slate-900">Area:</strong>{' '}
-                          {custArea}
+                          <strong className="text-slate-900">Area:</strong> {custArea}
                         </p>
                       </div>
                     )}
                   </div>
 
+                  {/* Vendor Dashboard Roadmap (PRD Mandated 4 Steps) */}
                   {role === 'vendor' && (
                     <div className="bg-slate-900 text-white p-5 rounded-2xl space-y-3 border border-slate-800">
                       <div className="flex items-center gap-2">
                         <ListChecks className="w-5 h-5 text-orange-400" />
-                        <h4 className="font-extrabold text-sm text-white">
-                          Your Dashboard Setup Roadmap
-                        </h4>
+                        <h4 className="font-extrabold text-sm text-white">Your Dashboard Setup Roadmap</h4>
                       </div>
                       <p className="text-xs text-slate-300">
-                        Complete these 4 quick steps in your Vendor Dashboard
-                        to go live:
+                        After completing registration, you will finalize these 4 quick steps in your Vendor Dashboard to go live:
                       </p>
+
                       <div className="space-y-2 text-xs">
-                        {[
-                          {
-                            n: '1',
-                            text: 'Upload Cover Photo, Logo & Physical Address',
-                            accent: 'bg-orange-600 text-white',
-                          },
-                          {
-                            n: '2',
-                            text: 'Add Your Products with Prices (₦)',
-                            accent: 'bg-orange-600 text-white',
-                          },
-                          {
-                            n: '3',
-                            text: 'Complete NIMC 11-Digit NIN Verification (Required)',
-                            accent: 'bg-amber-400 text-slate-950',
-                          },
-                          {
-                            n: '4',
-                            text: 'Submit Store for Admin Review & Launch',
-                            accent: 'bg-orange-600 text-white',
-                          },
-                        ].map(({ n, text, accent }) => (
-                          <div
-                            key={n}
-                            className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700"
-                          >
-                            <span
-                              className={`w-5 h-5 rounded-full ${accent} font-black flex items-center justify-center text-[10px]`}
-                            >
-                              {n}
-                            </span>
-                            <span>{text}</span>
-                          </div>
-                        ))}
+                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                          <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-black flex items-center justify-center text-[10px]">
+                            1
+                          </span>
+                          <span>Upload Cover Photo, Logo & Physical Address</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                          <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-black flex items-center justify-center text-[10px]">
+                            2
+                          </span>
+                          <span>Add Your Products with Prices (₦)</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                          <span className="w-5 h-5 rounded-full bg-amber-400 text-slate-950 font-black flex items-center justify-center text-[10px]">
+                            3
+                          </span>
+                          <span>Complete NIMC 11-Digit NIN Verification (Required)</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                          <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-black flex items-center justify-center text-[10px]">
+                            4
+                          </span>
+                          <span>Submit Store for Admin Review & Launch</span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1318,7 +1132,7 @@ export const AuthPage: React.FC = () => {
                   <button
                     onClick={handleCompleteRegistration}
                     disabled={isSubmitting}
-                    className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-extrabold py-3.5 rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2"
+                    className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-extrabold py-3.5 rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isSubmitting ? (
                       <>
@@ -1328,9 +1142,7 @@ export const AuthPage: React.FC = () => {
                     ) : (
                       <>
                         <CheckCircle2 className="w-5 h-5" />
-                        {role === 'vendor'
-                          ? 'Complete Registration & Open Dashboard'
-                          : 'Complete Registration & Explore IkoroduSquare'}
+                        {role === 'vendor' ? 'Complete Registration & Open Dashboard' : 'Complete Registration & Explore IkoroduSquare'}
                       </>
                     )}
                   </button>

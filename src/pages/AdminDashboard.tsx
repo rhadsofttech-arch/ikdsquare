@@ -45,6 +45,7 @@ import {
   Activity,
   CreditCard,
   Megaphone,
+  RefreshCw,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -434,14 +435,32 @@ export const AdminDashboard: React.FC = () => {
       {/* TAB 1: VENDOR APPROVAL QUEUE */}
       {activeTab === 'approvals' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-extrabold text-lg text-slate-900">Pending Vendor Registrations</h3>
               <p className="text-xs text-slate-500">Inspect registered business details before approving or rejecting</p>
             </div>
-            <span className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 self-start sm:self-auto">
-              {pendingVendors.length} Application{pendingVendors.length !== 1 ? 's' : ''} Awaiting Review
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={async () => {
+                  const repaired = await StorageManager.repairOrphanedVendorsAsync();
+                  refreshData();
+                  if (repaired > 0) {
+                    showToast('success', 'Repair Completed', `Successfully restored ${repaired} missing vendor record(s) into public.vendors.`);
+                  } else {
+                    showToast('info', 'Database Verified', 'All vendor users already have corresponding vendor store records.');
+                  }
+                }}
+                className="text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Scan public.users and repair vendor users missing records in public.vendors"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                Scan & Repair Vendors
+              </button>
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                {pendingVendors.length} Application{pendingVendors.length !== 1 ? 's' : ''} Awaiting Review
+              </span>
+            </div>
           </div>
 
           {pendingVendors.length === 0 ? (
