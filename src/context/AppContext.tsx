@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { User, Vendor, Product, Review, Enquiry, BannerAd, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS } from '../types';
+import {
+  User, Vendor, Product, Review, Enquiry, BannerAd,
+  Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS,
+} from '../types';
 import { StorageManager, rowToVendor } from '../data/mockStorage';
 import { ApiService } from '../services/api';
 import { supabase } from '../services/supabase';
@@ -23,7 +26,7 @@ interface AppContextType {
   currentUser: User | null;
   setCurrentUser: (user: User | null) => void;
   activeVendor: Vendor | null;
-  
+
   vendors: Vendor[];
   products: Product[];
   reviews: Review[];
@@ -76,51 +79,26 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/** IDs of vendors the admin has explicitly deleted — never re-inject these. */
-function getDeletedVendorIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem('ikorodusquare_deleted_vendor_ids');
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-const VENDORS_KEY = 'ikorodusquare_vendors_v1';
-
-/**
- * Pull the latest vendor list directly from Supabase and write it into
- * localStorage so that StorageManager.getVendors() returns fresh data.
- * Respects the deleted-vendor tombstone list so soft-deleted records are
- * never re-injected from the database.
- */
-async function syncVendorsFromSupabase(): Promise<Vendor[]> {
-  if (!supabase) return [];
+// ── Pure Supabase vendor fetcher — no localStorage involved ────────────────
+async function fetchVendorsFromSupabase(): Promise<Vendor[]> {
+  if (!supabase) return StorageManager.getVendors();
   try {
     const { data, error } = await supabase.from('vendors').select('*');
-    if (error || !data) return [];
-
-    const deletedIds = getDeletedVendorIds();
-    const fresh = data
-      .map((r: any) => rowToVendor(r))
-      .filter((v: Vendor) => !deletedIds.has(v.id));
-
-    localStorage.setItem(VENDORS_KEY, JSON.stringify(fresh));
-    return fresh;
+    if (error || !data) {
+      console.warn('[fetchVendors] Supabase error:', error?.message);
+      return [];
+    }
+    return data.map((r: any) => rowToVendor(r));
   } catch (e) {
-    console.warn('[syncVendorsFromSupabase] failed, using cached data:', e);
+    console.warn('[fetchVendors] Exception:', e);
     return [];
   }
 }
 
 // ── Provider ───────────────────────────────────────────────────────────────
-
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
-  // ── Route helpers ──────────────────────────────────────────────────────
-
+  // ── Route helpers ────────────────────────────────────────────────────────
   const getInitialPageAndSlug = () => {
     if (typeof window === 'undefined') return { page: 'home', slug: null, adminMode: false };
 
@@ -202,15 +180,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // ── State ──────────────────────────────────────────────────────────────
-
+  // ── State ────────────────────────────────────────────────────────────────
   const initialNav = getInitialPageAndSlug();
   const [currentPage, setCurrentPageState] = useState<string>(initialNav.page);
   const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(initialNav.slug);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  // Vendors live ONLY in React state — fetched from Supabase, never localStorage
   const [vendors, setVendors] = useState<Vendor[]>([]);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
@@ -235,12 +215,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'en';
   });
 
-  // Ref used by the realtime subscription to avoid calling setState on an
-  // unmounted component.
   const isMountedRef = useRef(true);
 
-  // ── Language ───────────────────────────────────────────────────────────
-
+  // ── Language ─────────────────────────────────────────────────────────────
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
     if (typeof window !== 'undefined') localStorage.setItem('ikorodusquare_lang', lang);
@@ -252,8 +229,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return defaultText || TRANSLATIONS['en'][key] || key;
   };
 
-  // ── Navigation ─────────────────────────────────────────────────────────
-
+  // ── Navigation ────────────────────────────────────────────────────────────
   const setCurrentPage = (page: string) => {
     const isEffectiveAdmin = isAdminMode || currentUser?.role === 'admin';
     const protectedPages = ['dashboard', 'admin', 'profile', 'user-profile'];
@@ -269,40 +245,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // ── Core data refresh ──────────────────────────────────────────────────
-  //
-  // Always pulls vendors fresh from Supabase first so the approval queue
-  // reflects what is actually in the database, not a stale localStorage
-  // snapshot that may predate the most recent registration.
-
+  // ── Core data refresh ─────────────────────────────────────────────────────
+  // Vendors always come from Supabase directly — no localStorage read/write
   const refreshData = async (): Promise<void> => {
     StorageManager.checkAndSyncPromotionExpiries();
 
-    // Re-fetch vendor list from Supabase so the approval queue reflects
-    // what is actually in the database.
-    const freshVendors = await syncVendorsFromSupabase();
+    // Always fetch vendors fresh from Supabase
+    const freshVendors = await fetchVendorsFromSupabase();
+    if (isMountedRef.current && freshVendors.length > 0) {
+      setVendors(freshVendors);
+    }
 
-    setPromotions(StorageManager.getPromotions());
-    setAdminSettings(StorageManager.getSettings());
-    // Use the freshly fetched list when available, fall back to localStorage.
-    setVendors(freshVendors.length > 0 ? freshVendors : StorageManager.getVendors());
-    setProducts(StorageManager.getProducts());
-    setReviews(StorageManager.getReviews());
-    setEnquiries(StorageManager.getEnquiries());
-    setBanners(StorageManager.getBanners());
-    setFavorites(StorageManager.getFavorites());
+    // Non-vendor data (still uses StorageManager for now)
+    if (isMountedRef.current) {
+      setPromotions(StorageManager.getPromotions());
+      setAdminSettings(StorageManager.getSettings());
+      setProducts(StorageManager.getProducts());
+      setReviews(StorageManager.getReviews());
+      setEnquiries(StorageManager.getEnquiries());
+      setBanners(StorageManager.getBanners());
+      setFavorites(StorageManager.getFavorites());
+    }
   };
 
-  // ── Settings ───────────────────────────────────────────────────────────
-
+  // ── Settings ──────────────────────────────────────────────────────────────
   const updateAdminSettings = (settings: AdminSettings) => {
     StorageManager.saveSettings(settings);
     setAdminSettings(settings);
     showToast('success', 'Settings Saved', 'Bank account and WhatsApp support settings updated.');
   };
 
-  // ── Promotions ─────────────────────────────────────────────────────────
-
+  // ── Promotions ────────────────────────────────────────────────────────────
   const createPromotionRequest = async (promo: Promotion) => {
     StorageManager.createPromotionRequest(promo);
     await refreshData();
@@ -321,8 +294,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('info', 'Promotion Updated', `Promotion status updated to ${readableStatus}.`);
   };
 
-  // ── Auth resolution ────────────────────────────────────────────────────
-
+  // ── Auth resolution ────────────────────────────────────────────────────────
   const resolveUserFromSupabase = async (supaUser: any): Promise<User> => {
     const email = supaUser.email || '';
     const isAdmin = isAdminEmail(email);
@@ -386,100 +358,120 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // ── Boot effect ────────────────────────────────────────────────────────
-
+  // ── Boot effect ───────────────────────────────────────────────────────────
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Populate UI immediately from local cache while the network call runs
-    const seedFromCache = () => {
+    // Seed non-vendor data from localStorage immediately for fast first paint
+    const seedNonVendorFromCache = () => {
       if (!isMountedRef.current) return;
       setPromotions(StorageManager.getPromotions());
       setAdminSettings(StorageManager.getSettings());
-      setVendors(StorageManager.getVendors());
       setProducts(StorageManager.getProducts());
       setReviews(StorageManager.getReviews());
       setEnquiries(StorageManager.getEnquiries());
       setBanners(StorageManager.getBanners());
       setFavorites(StorageManager.getFavorites());
+      // NOTE: vendors are NOT seeded from localStorage — they come from Supabase only
     };
 
-    seedFromCache();
+    seedNonVendorFromCache();
 
     let authComplete = false;
-    let syncComplete = false;
+    let vendorFetchComplete = false;
 
     const checkHydrationComplete = () => {
-      if (authComplete && syncComplete && isMountedRef.current) setIsLoading(false);
+      if (authComplete && vendorFetchComplete && isMountedRef.current) {
+        setIsLoading(false);
+      }
     };
 
-    // Safety timer so the loading state never hangs when offline
+    // Safety fallback so loading state never hangs
     const fallbackTimer = setTimeout(() => {
       if (isMountedRef.current) setIsLoading(false);
-    }, 2500);
+    }, 3000);
 
-    StorageManager.initFirestoreSync(() => {
-      if (isMountedRef.current) {
-        syncComplete = true;
-        checkHydrationComplete();
-      }
-    })
-      .then(async () => {
-        if (isMountedRef.current) {
-          await refreshData();
-          syncComplete = true;
-          checkHydrationComplete();
+    // Fetch vendors directly from Supabase on boot — bypass localStorage entirely
+    fetchVendorsFromSupabase()
+      .then((freshVendors) => {
+        if (isMountedRef.current && freshVendors.length > 0) {
+          setVendors(freshVendors);
         }
+        vendorFetchComplete = true;
+        checkHydrationComplete();
       })
       .catch((e) => {
-        console.warn('[Hydration Sync Warning]:', e);
+        console.warn('[Boot] Vendor fetch failed, falling back to StorageManager:', e);
         if (isMountedRef.current) {
-          syncComplete = true;
-          checkHydrationComplete();
+          setVendors(StorageManager.getVendors());
         }
+        vendorFetchComplete = true;
+        checkHydrationComplete();
       });
 
-    // ── FIX: Realtime vendor subscription ─────────────────────────────
-    //
-    // The previous realtime channel (inside initFirestoreSync) only wrote to
-    // localStorage — it never updated React state. So the admin approval queue
-    // would not show a newly registered vendor unless the admin manually
-    // refreshed the browser.
-    //
-    // This subscription lives in the context so it can call setVendors()
-    // directly whenever any row in the vendors table is inserted, updated,
-    // or deleted. This means:
-    //   • New vendor registers  → appears in approval queue instantly
-    //   • Admin approves        → status badge updates for all open sessions
-    //   • Admin deletes         → vendor disappears from directory immediately
-    //
-    // Deleted-vendor tombstones are respected so soft-deleted seed records
-    // are never re-injected by the realtime event.
+    // Also run non-vendor Supabase sync (products, reviews, etc.) in background
+    StorageManager.initFirestoreSync(() => {
+      if (isMountedRef.current) {
+        setProducts(StorageManager.getProducts());
+        setReviews(StorageManager.getReviews());
+        setEnquiries(StorageManager.getEnquiries());
+        setBanners(StorageManager.getBanners());
+      }
+    }).catch((e) => console.warn('[initFirestoreSync] Warning:', e));
 
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    // ── Realtime vendor subscription ──────────────────────────────────────
+    // This is the ONLY place vendor state gets updated after boot.
+    // We use payload data directly for INSERT/UPDATE to avoid race conditions.
+    // No localStorage reads or writes happen here.
+    let realtimeChannel: any = null;
 
     if (supabase) {
       realtimeChannel = supabase
-        .channel('context:vendors:all')
+        .channel('context:vendors:realtime')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'vendors' },
-          async () => {
+          async (payload: any) => {
             if (!isMountedRef.current) return;
-            // Re-fetch the full vendor list from Supabase on any change.
-            // This is simpler and safer than trying to patch a single row
-            // into the existing state array.
-            const fresh = await syncVendorsFromSupabase();
-            if (isMountedRef.current) {
-              setVendors(fresh.length > 0 ? fresh : StorageManager.getVendors());
+
+            if (payload.eventType === 'INSERT' && payload.new?.id) {
+              // Immediately add the new vendor from payload — no re-fetch needed.
+              // This is what makes new registrations appear instantly in the
+              // admin approval queue without any delay or race condition.
+              const newVendor = rowToVendor(payload.new);
+              setVendors((prev) => {
+                if (prev.some((v) => v.id === newVendor.id)) return prev;
+                return [newVendor, ...prev];
+              });
+
+            } else if (payload.eventType === 'UPDATE' && payload.new?.id) {
+              // Patch just the updated vendor row in state
+              const updatedVendor = rowToVendor(payload.new);
+              setVendors((prev) =>
+                prev.map((v) => v.id === updatedVendor.id ? updatedVendor : v)
+              );
+
+            } else if (payload.eventType === 'DELETE' && payload.old?.id) {
+              // Remove the deleted vendor from state immediately
+              setVendors((prev) => prev.filter((v) => v.id !== payload.old.id));
+
+            } else {
+              // Fallback: full re-fetch for any other event type
+              const fresh = await fetchVendorsFromSupabase();
+              if (isMountedRef.current && fresh.length > 0) {
+                setVendors(fresh);
+              }
             }
           }
         )
-        .subscribe();
+        .subscribe((status: string) => {
+          console.log('[Realtime vendors] channel status:', status);
+        });
     }
 
-    // Auth session restoration
+    // ── Auth session restoration ───────────────────────────────────────────
     let authSubscription: { unsubscribe: () => void } | null = null;
+
     if (supabase) {
       supabase.auth
         .getSession()
@@ -494,7 +486,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           checkHydrationComplete();
         })
         .catch((e) => {
-          console.warn('[Hydration Auth Error]:', e);
+          console.warn('[Boot Auth Error]:', e);
           if (isMountedRef.current) {
             authComplete = true;
             checkHydrationComplete();
@@ -526,6 +518,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       authSubscription = data.subscription;
     } else {
       authComplete = true;
+      vendorFetchComplete = true;
       checkHydrationComplete();
     }
 
@@ -533,15 +526,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMountedRef.current = false;
       clearTimeout(fallbackTimer);
       if (authSubscription) authSubscription.unsubscribe();
-      // Clean up the vendor realtime channel on unmount
       if (realtimeChannel && supabase) {
         supabase.removeChannel(realtimeChannel);
       }
     };
   }, []);
 
-  // ── URL sync effect ────────────────────────────────────────────────────
-
+  // ── URL sync effect ───────────────────────────────────────────────────────
   useEffect(() => {
     const handleUrlChange = () => {
       const nav = getInitialPageAndSlug();
@@ -580,8 +571,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // ── Derived state ──────────────────────────────────────────────────────
-
+  // ── Derived state ─────────────────────────────────────────────────────────
+  // activeVendor is derived from vendors state (already fetched from Supabase)
   const activeVendor = currentUser
     ? vendors.find(
         (v) =>
@@ -592,8 +583,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ) || null
     : null;
 
-  // ── UI helpers ─────────────────────────────────────────────────────────
-
+  // ── UI helpers ────────────────────────────────────────────────────────────
   const navigateToStore = (slug: string) => {
     setActiveVendorSlug(slug);
     setCurrentPageState('store');
@@ -626,7 +616,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('success', 'Saved!', updated.includes(vendorId) ? 'Added to your favourites.' : 'Removed from favourites.');
   };
 
-  // ── Admin vendor actions ───────────────────────────────────────────────
+  // ── Admin vendor actions ──────────────────────────────────────────────────
+  // These write directly to Supabase; the realtime UPDATE event updates React state automatically.
+  // We call refreshData() after each action as a safety net for non-realtime cases.
 
   const approveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
@@ -639,10 +631,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       approvedAt: v.approvedAt || new Date().toISOString(),
     };
 
-    StorageManager.updateVendor(updatedVendor);
-    await refreshData();
+    // Write to Supabase — realtime UPDATE event will update local state
+    await StorageManager.updateVendorAsync(updatedVendor);
 
-    const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live to thousands of customers across Ikorodu! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
+    const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
     await ApiService.sendWhatsAppNotification(v.whatsapp, message);
 
     showToast('success', 'Vendor Approved', `"${v.businessName}" is now live and public.`);
@@ -653,8 +645,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!v) return;
 
     const updatedVendor: Vendor = { ...v, status: 'pending', isLive: false };
-    StorageManager.updateVendor(updatedVendor);
-    await refreshData();
+    await StorageManager.updateVendorAsync(updatedVendor);
 
     showToast('info', 'Vendor Unapproved', `"${v.businessName}" status set to pending.`);
   };
@@ -690,8 +681,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : v.ninData,
     };
 
-    StorageManager.updateVendor(updatedVendor);
-    await refreshData();
+    await StorageManager.updateVendorAsync(updatedVendor);
 
     showToast(
       newStatus ? 'success' : 'info',
@@ -714,8 +704,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       featuredOnHomepage: newFeatured,
     };
 
-    StorageManager.updateVendor(updatedVendor);
-    await refreshData();
+    await StorageManager.updateVendorAsync(updatedVendor);
 
     showToast(
       newFeatured ? 'success' : 'info',
@@ -729,8 +718,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!v) return;
 
     const updatedVendor: Vendor = { ...v, status: 'rejected', isLive: false };
-    StorageManager.updateVendor(updatedVendor);
-    await refreshData();
+    await StorageManager.updateVendorAsync(updatedVendor);
 
     const message = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}. Please update your profile in your dashboard.`;
     await ApiService.sendWhatsAppNotification(v.whatsapp, message);
@@ -740,13 +728,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
+    // deleteVendorAsync deletes from Supabase; realtime DELETE event removes from state
     await StorageManager.deleteVendorAsync(vendorId);
-    await refreshData();
     showToast('info', 'Vendor Removed', `"${v?.businessName || 'Store'}" has been deleted from IkoroduSquare.`);
   };
 
-  // ── Provider render ────────────────────────────────────────────────────
-
+  // ── Provider render ───────────────────────────────────────────────────────
   return (
     <AppContext.Provider
       value={{

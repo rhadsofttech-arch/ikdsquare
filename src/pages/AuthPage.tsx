@@ -7,8 +7,7 @@ import {
   signUpWithEmailPassword,
   loginWithEmailPassword,
   resendSupabaseVerificationEmail,
-  checkSupabaseEmailVerified,
-  isSupabaseConfigured
+  isSupabaseConfigured,
 } from '../services/supabase';
 import { ALL_IKORODU_AREAS, CATEGORY_GROUPS, ALL_SUBCATEGORIES } from '../data/ikoroduData';
 import { User, Vendor } from '../types';
@@ -17,10 +16,8 @@ import {
   Store,
   ShieldCheck,
   CheckCircle2,
-  Lock,
   Phone,
   ArrowRight,
-  ArrowLeft,
   MessageCircle,
   Sparkles,
   AlertCircle,
@@ -35,22 +32,18 @@ import {
 export const AuthPage: React.FC = () => {
   const { currentUser, setCurrentUser, setCurrentPage, showToast, refreshData } = useApp();
 
-  // Redirect if user is already authenticated
+  // Redirect if already authenticated
   useEffect(() => {
     if (currentUser) {
-      if (currentUser.role === 'admin') {
-        setCurrentPage('admin');
-      } else if (currentUser.role === 'vendor') {
-        setCurrentPage('dashboard');
-      } else {
-        setCurrentPage('home');
-      }
+      if (currentUser.role === 'admin') setCurrentPage('admin');
+      else if (currentUser.role === 'vendor') setCurrentPage('dashboard');
+      else setCurrentPage('home');
     }
   }, [currentUser, setCurrentPage]);
 
   const [authTab, setAuthTab] = useState<'signin' | 'register'>(() => {
     if (typeof window !== 'undefined') {
-      const hash = window.location.hash.toLowerCase();
+      const hash   = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
       if (hash.includes('register') || search.includes('register') || search.includes('mode=register')) {
         return 'register';
@@ -59,49 +52,46 @@ export const AuthPage: React.FC = () => {
     return 'signin';
   });
 
-  // Password visibility states
+  // Password visibility
   const [showSignInPassword, setShowSignInPassword] = useState(false);
-  const [showCustPassword, setShowCustPassword] = useState(false);
+  const [showCustPassword,   setShowCustPassword]   = useState(false);
   const [showVendorPassword, setShowVendorPassword] = useState(false);
 
-  // Sign in state
-  const [signInMode, setSignInMode] = useState<'phone' | 'email'>('phone');
-  const [signInPhone, setSignInPhone] = useState('');
-  const [signInEmail, setSignInEmail] = useState('');
+  // Sign-in state
+  const [signInMode,     setSignInMode]     = useState<'phone' | 'email'>('phone');
+  const [signInPhone,    setSignInPhone]    = useState('');
+  const [signInEmail,    setSignInEmail]    = useState('');
   const [signInPassword, setSignInPassword] = useState('');
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isSigningIn,    setIsSigningIn]    = useState(false);
 
-  // Three-step registration state
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [role, setRole] = useState<'customer' | 'vendor'>('vendor');
+  // Registration state
+  const [step, setStep]            = useState<1 | 2 | 3>(1);
+  const [role, setRole]            = useState<'customer' | 'vendor'>('vendor');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Step 2 Customer fields
-  const [custName, setCustName] = useState('');
-  const [custEmail, setCustEmail] = useState('');
-  const [custPhone, setCustPhone] = useState('');
-  const [custArea, setCustArea] = useState('Agric');
+  // Customer fields
+  const [custName,     setCustName]     = useState('');
+  const [custEmail,    setCustEmail]    = useState('');
+  const [custPhone,    setCustPhone]    = useState('');
+  const [custArea,     setCustArea]     = useState('Agric');
   const [custPassword, setCustPassword] = useState('');
 
-  // Step 2 Vendor fields
-  const [businessName, setBusinessName] = useState('');
-  const [ownerName, setOwnerName] = useState('');
-  const [vendorEmail, setVendorEmail] = useState('');
-  const [vendorPhone, setVendorPhone] = useState('');
-  const [category, setCategory] = useState(ALL_SUBCATEGORIES[0]);
-  const [area, setArea] = useState('Agric');
-  const [vendorPassword, setVendorPassword] = useState('');
+  // Vendor fields
+  const [businessName,    setBusinessName]    = useState('');
+  const [ownerName,       setOwnerName]       = useState('');
+  const [vendorEmail,     setVendorEmail]     = useState('');
+  const [vendorPhone,     setVendorPhone]     = useState('');
+  const [category,        setCategory]        = useState(ALL_SUBCATEGORIES[0]);
+  const [area,            setArea]            = useState('Agric');
+  const [vendorPassword,  setVendorPassword]  = useState('');
 
-  // Email OTP State for Vendor Registration
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState('123456');
-  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
-  const [otpVerified, setOtpVerified] = useState(false);
-  const [otpError, setOtpError] = useState('');
-  const [attemptsLeft, setAttemptsLeft] = useState(5);
+  // OTP state
+  const [otpSent,      setOtpSent]      = useState(false);
+  const [otpLoading,   setOtpLoading]   = useState(false);
+  const [otpDigits,    setOtpDigits]    = useState(['', '', '', '', '', '']);
+  const [otpVerified,  setOtpVerified]  = useState(false);
+  const [otpError,     setOtpError]     = useState('');
 
-  // Refs for 6 OTP input boxes
   const inputRefs = [
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -111,56 +101,41 @@ export const AuthPage: React.FC = () => {
     useRef<HTMLInputElement>(null),
   ];
 
-  // Auto focus first OTP input when sent
   useEffect(() => {
     if (otpSent && !otpVerified && inputRefs[0].current) {
       inputRefs[0].current.focus();
     }
   }, [otpSent, otpVerified]);
 
-  // Handle Send Email OTP
+  // ── OTP handlers ────────────────────────────────────────────────────────
   const handleSendOTP = async () => {
     const targetEmail = role === 'vendor' ? vendorEmail : custEmail;
     if (!targetEmail || !targetEmail.includes('@') || targetEmail.length < 5) {
       showToast('error', 'Invalid Email', 'Please enter a valid email address.');
       return;
     }
-
     setOtpLoading(true);
     setOtpError('');
     const res = await ApiService.sendOTP(targetEmail);
     setOtpLoading(false);
-
+    setOtpSent(true);
     if (res.success) {
-      setOtpSent(true);
       showToast('success', 'Email Code Sent', res.message || `Verification code sent to ${targetEmail}`);
     } else {
-      setOtpSent(true);
       showToast('info', 'OTP Sent', res.message || 'Please check your email inbox for the verification code.');
     }
   };
 
-  // Quick fill helper
-  const handleQuickFillOTP = (codeToFill: string) => {
-    const digits = codeToFill.slice(0, 6).split('');
-    while (digits.length < 6) digits.push('');
-    setOtpDigits(digits);
-    autoVerifyOTP(codeToFill);
-  };
-
-  // Handle OTP Digit Input & Auto Verify
   const handleDigitChange = (index: number, value: string) => {
     if (value.length > 1) value = value.slice(-1);
     const newDigits = [...otpDigits];
     newDigits[index] = value;
     setOtpDigits(newDigits);
 
-    // Auto-advance focus to next box
     if (value && index < 5 && inputRefs[index + 1].current) {
       inputRefs[index + 1].current?.focus();
     }
 
-    // When all 6 boxes are filled, automatically call verification!
     const fullCode = newDigits.join('');
     if (fullCode.length === 6 && !newDigits.includes('')) {
       autoVerifyOTP(fullCode);
@@ -187,13 +162,11 @@ export const AuthPage: React.FC = () => {
     } else {
       setOtpError(res.error || 'Verification failed. Please check your code and try again.');
       setOtpDigits(['', '', '', '', '', '']);
-      if (inputRefs[0].current) {
-        inputRefs[0].current.focus();
-      }
+      if (inputRefs[0].current) inputRefs[0].current.focus();
     }
   };
 
-  // Google Sign In via Supabase Auth
+  // ── Google Sign-In ────────────────────────────────────────────────────────
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
@@ -204,7 +177,7 @@ export const AuthPage: React.FC = () => {
     }
   };
 
-  // Sign In submit
+  // ── Sign-In ───────────────────────────────────────────────────────────────
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSigningIn(true);
@@ -212,22 +185,36 @@ export const AuthPage: React.FC = () => {
       if (signInMode === 'email' && signInEmail) {
         if (!signInEmail.includes('@') || !signInPassword) {
           showToast('error', 'Incomplete Form', 'Please enter your email address and password.');
-          setIsSigningIn(false);
           return;
         }
+
         try {
           const supaUser = await loginWithEmailPassword(signInEmail, signInPassword);
           const isVerified = supaUser ? supaUser.emailVerified : true;
 
-          const vendors = StorageManager.getVendors();
-          const matchingVendor = vendors.find(
-            (v) => v.email?.toLowerCase() === signInEmail.toLowerCase()
-          );
+          // Resolve vendor record from Supabase directly
+          let matchingVendor: Vendor | null = null;
+          try {
+            const { supabase } = await import('../services/supabase');
+            if (supabase) {
+              const { data } = await supabase
+                .from('vendors')
+                .select('*')
+                .ilike('email', signInEmail)
+                .maybeSingle();
+              if (data) {
+                const { rowToVendor } = await import('../data/mockStorage');
+                matchingVendor = rowToVendor(data);
+              }
+            }
+          } catch (e) {
+            console.warn('[SignIn] Vendor lookup warning:', e);
+          }
 
           const user: User = {
             id: supaUser ? supaUser.id : 'u-' + Date.now(),
             name: matchingVendor ? matchingVendor.ownerName : signInEmail.split('@')[0],
-            phone: signInPhone || matchingVendor?.phone || '08030000000',
+            phone: matchingVendor?.phone || '08030000000',
             email: signInEmail,
             emailVerified: isVerified,
             role: matchingVendor ? 'vendor' : 'customer',
@@ -238,60 +225,49 @@ export const AuthPage: React.FC = () => {
           setCurrentUser(user);
 
           if (!isVerified) {
-            showToast('info', 'Email Verification Required', `Verification link sent to ${signInEmail}. Account access is restricted until confirmed.`);
+            showToast('info', 'Email Verification Required', `Verification link sent to ${signInEmail}.`);
           } else {
             showToast('success', 'Signed In', `Welcome back, ${user.name}!`);
           }
 
-          if (user.role === 'vendor') {
-            setCurrentPage('dashboard');
-          } else {
-            setCurrentPage('home');
-          }
+          if (user.role === 'vendor') setCurrentPage('dashboard');
+          else setCurrentPage('home');
+
         } catch (err: any) {
           if (isSupabaseConfigured()) {
-            console.error('Sign In Error:', err);
             const msg = err.message || 'Invalid email address or password. Please try again.';
             showToast('error', 'Sign In Failed', msg);
-            setIsSigningIn(false);
             return;
           }
 
-          const vendors = StorageManager.getVendors();
-          const matchingVendor = vendors.find(
-            (v) => v.email?.toLowerCase() === signInEmail.toLowerCase()
-          );
-
-          const user: User = {
-            id: 'u-' + Date.now(),
-            name: matchingVendor ? matchingVendor.ownerName : signInEmail.split('@')[0],
-            phone: signInPhone || matchingVendor?.phone || '08030000000',
-            email: signInEmail,
-            emailVerified: matchingVendor?.emailVerified ?? true,
-            role: matchingVendor ? 'vendor' : 'customer',
-            vendorId: matchingVendor?.id,
-            createdAt: new Date().toISOString(),
-          };
-
-          setCurrentUser(user);
-          showToast('success', 'Signed In', `Welcome back, ${user.name}!`);
-          if (user.role === 'vendor') {
-            setCurrentPage('dashboard');
-          } else {
-            setCurrentPage('home');
-          }
+          // Offline fallback — try matching from seed data only
+          showToast('error', 'Sign In Failed', 'Unable to connect. Please check your internet connection.');
         }
+
       } else {
-        const vendors = StorageManager.getVendors();
-        const matchingVendor = vendors.find(
-          (v) => v.phone?.includes(signInPhone) || v.whatsapp?.includes(signInPhone)
-        );
+        // Phone-based sign-in — resolve from Supabase
+        let matchingVendor: Vendor | null = null;
+        try {
+          const { supabase } = await import('../services/supabase');
+          if (supabase && signInPhone) {
+            const { data } = await supabase
+              .from('vendors')
+              .select('*')
+              .or(`whatsapp.ilike.%${signInPhone}%,phone.ilike.%${signInPhone}%`)
+              .maybeSingle();
+            if (data) {
+              const { rowToVendor } = await import('../data/mockStorage');
+              matchingVendor = rowToVendor(data);
+            }
+          }
+        } catch (e) {
+          console.warn('[SignIn] Phone vendor lookup warning:', e);
+        }
 
         const user: User = {
           id: 'u-' + Date.now(),
           name: matchingVendor ? matchingVendor.ownerName : 'Ikorodu User',
           phone: signInPhone || '08030000000',
-          email: signInEmail || undefined,
           emailVerified: true,
           role: matchingVendor ? 'vendor' : 'customer',
           vendorId: matchingVendor?.id,
@@ -300,18 +276,15 @@ export const AuthPage: React.FC = () => {
 
         setCurrentUser(user);
         showToast('success', 'Signed In', `Welcome back, ${user.name}!`);
-        if (user.role === 'vendor') {
-          setCurrentPage('dashboard');
-        } else {
-          setCurrentPage('home');
-        }
+        if (user.role === 'vendor') setCurrentPage('dashboard');
+        else setCurrentPage('home');
       }
     } finally {
       setIsSigningIn(false);
     }
   };
 
-  // Step 2 Proceed to Step 3
+  // ── Step 2 → Step 3 ───────────────────────────────────────────────────────
   const handleProceedToStep3 = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -321,7 +294,7 @@ export const AuthPage: React.FC = () => {
         return;
       }
       if (!otpVerified) {
-        showToast('error', 'Email Verification Required', 'You must verify your email address via 6-digit OTP code before proceeding.');
+        showToast('error', 'Email Verification Required', 'You must verify your email address before proceeding.');
         return;
       }
       if (!businessName || !ownerName || !vendorPhone || !vendorPassword) {
@@ -338,7 +311,7 @@ export const AuthPage: React.FC = () => {
         return;
       }
       if (!custName || !custPhone || !custPassword) {
-        showToast('error', 'Incomplete Form', 'Please fill in all required customer details.');
+        showToast('error', 'Incomplete Form', 'Please fill in all required details.');
         return;
       }
       if (custPassword.length < 6) {
@@ -350,20 +323,20 @@ export const AuthPage: React.FC = () => {
     setStep(3);
   };
 
-  // Complete Registration
+  // ── Complete Registration ──────────────────────────────────────────────────
   const handleCompleteRegistration = async () => {
     setIsSubmitting(true);
     try {
-      let createdUser: User;
-      const targetEmail = role === 'vendor' ? vendorEmail : custEmail;
+      const targetEmail    = role === 'vendor' ? vendorEmail : custEmail;
       const targetPassword = role === 'vendor' ? vendorPassword : custPassword;
-      const targetName = role === 'vendor' ? ownerName : custName;
-      const targetPhone = role === 'vendor' ? vendorPhone : custPhone;
-      const targetArea = role === 'vendor' ? area : custArea;
+      const targetName     = role === 'vendor' ? ownerName : custName;
+      const targetPhone    = role === 'vendor' ? vendorPhone : custPhone;
+      const targetArea     = role === 'vendor' ? area : custArea;
 
-      let supaUid = 'u-' + Date.now();
+      let supaUid                  = 'u-' + Date.now();
       let isEmailVerifiedInSupabase = role === 'vendor' ? otpVerified : false;
 
+      // Create Supabase Auth account
       try {
         const supaUser = await signUpWithEmailPassword(targetEmail, targetPassword, {
           name: targetName,
@@ -372,30 +345,32 @@ export const AuthPage: React.FC = () => {
           area: targetArea,
         });
         if (supaUser) {
-          supaUid = supaUser.id;
+          supaUid                   = supaUser.id;
           isEmailVerifiedInSupabase = supaUser.emailVerified || isEmailVerifiedInSupabase;
         }
       } catch (err: any) {
-        console.warn('Supabase Auth Sign-Up Note:', err?.message || err);
         const errMsg = err?.message || '';
-
         if (errMsg.includes('already registered') || errMsg.includes('already in use')) {
           try {
             const loggedInUser = await loginWithEmailPassword(targetEmail, targetPassword);
             if (loggedInUser) {
-              supaUid = loggedInUser.id;
+              supaUid                   = loggedInUser.id;
               isEmailVerifiedInSupabase = loggedInUser.emailVerified || isEmailVerifiedInSupabase;
-              showToast('info', 'Account Connected', 'Existing account detected and authenticated.');
             }
           } catch (loginErr: any) {
-            showToast('error', 'Email Registered', 'This email is already registered. Please sign in instead.');
+            showToast('error', 'Email Already Registered', 'This email is already registered. Please sign in instead.');
+            setIsSubmitting(false);
+            return;
           }
         } else {
-          showToast('info', 'Registration Complete', `Your account has been registered successfully.`);
+          console.warn('[Registration] Supabase sign-up note:', errMsg);
         }
       }
 
+      let createdUser: User;
+
       if (role === 'vendor') {
+        // Generate unique slug — checks Supabase for collisions
         const uniqueSlug = await generateUniqueVendorSlug(businessName);
 
         const newVendor: Vendor = {
@@ -415,6 +390,7 @@ export const AuthPage: React.FC = () => {
           address: `${area}, Ikorodu, Lagos State`,
           coverPhotoURL: 'https://images.unsplash.com/photo-1556742049-0a670f4a4591?auto=format&fit=crop&w=1000&q=80',
           logoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+          // Always start as pending — admin must approve before going live
           status: 'pending',
           isLive: false,
           isPremium: false,
@@ -430,16 +406,19 @@ export const AuthPage: React.FC = () => {
           },
         };
 
+        // addVendorAsync writes directly to Supabase.
+        // AppContext's realtime INSERT handler picks up the new row and adds
+        // it to the vendors state — the admin approval queue updates instantly.
+        // No localStorage is involved in this flow.
+        let savedVendor: Vendor;
         try {
-          const savedVendor = await StorageManager.addVendorAsync(newVendor);
-          console.log('✅ [AuthPage] Vendor record successfully saved to database:', savedVendor.id);
-          newVendor.id = savedVendor.id;
+          savedVendor = await StorageManager.addVendorAsync(newVendor);
+          console.log('✅ Vendor written to Supabase:', savedVendor.id);
         } catch (vErr: any) {
-          console.error('❌ [AuthPage] Critical error saving vendor record to public.vendors:', vErr);
-          const errorMessage = vErr?.message || 'Failed to save vendor business details to database.';
-          showToast('error', 'Vendor Registration Failed', errorMessage);
+          console.error('❌ Critical: vendor write to Supabase failed:', vErr);
+          showToast('error', 'Registration Failed', vErr?.message || 'Failed to create your vendor store. Please try again.');
           setIsSubmitting(false);
-          return; // STOP! Registration MUST fail and NOT continue to dashboard
+          return;
         }
 
         createdUser = {
@@ -449,11 +428,37 @@ export const AuthPage: React.FC = () => {
           emailVerified: isEmailVerifiedInSupabase,
           phone: vendorPhone,
           role: 'vendor',
-          vendorId: newVendor.id,
+          vendorId: savedVendor.id,
           area,
           createdAt: new Date().toISOString(),
         };
+
+        // Write user record to Supabase users table (not localStorage)
+        await StorageManager.setCurrentUserAsync(createdUser);
+        setCurrentUser(createdUser);
+
+        // Trigger a data refresh so activeVendor resolves correctly
+        await refreshData();
+
+        if (!isEmailVerifiedInSupabase) {
+          await resendSupabaseVerificationEmail(targetEmail);
+          showToast(
+            'success',
+            'Registration Successful!',
+            `Welcome ${createdUser.name}! Store created. Check ${targetEmail} for your verification link.`
+          );
+        } else {
+          showToast(
+            'success',
+            'Registration Complete!',
+            `Store "${businessName}" created and email verified. Welcome to your Vendor Dashboard.`
+          );
+        }
+
+        setCurrentPage('dashboard');
+
       } else {
+        // Customer registration
         createdUser = {
           id: supaUid,
           name: custName,
@@ -464,40 +469,14 @@ export const AuthPage: React.FC = () => {
           area: custArea,
           createdAt: new Date().toISOString(),
         };
-      }
 
-      await StorageManager.setCurrentUserAsync(createdUser);
-      setCurrentUser(createdUser);
-      refreshData();
+        await StorageManager.setCurrentUserAsync(createdUser);
+        setCurrentUser(createdUser);
 
-      if (role === 'vendor') {
-        if (!isEmailVerifiedInSupabase) {
-          await resendSupabaseVerificationEmail(targetEmail);
-          showToast(
-            'success',
-            'Registration Successful!',
-            `Welcome ${createdUser.name}! Store created. Please check ${targetEmail} for your email verification link.`
-          );
-        } else {
-          showToast(
-            'success',
-            'Registration Complete & Verified!',
-            `Store "${businessName}" created and email verified. Welcome to your Vendor Dashboard.`
-          );
-        }
-      } else {
-        showToast(
-          'success',
-          'Registration Successful!',
-          `Welcome to IkoroduSquare, ${custName}!`
-        );
-      }
-
-      if (role === 'vendor') {
-        setCurrentPage('dashboard');
-      } else {
+        showToast('success', 'Registration Successful!', `Welcome to IkoroduSquare, ${custName}!`);
         setCurrentPage('home');
       }
+
     } finally {
       setIsSubmitting(false);
     }
@@ -506,7 +485,8 @@ export const AuthPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-100 py-12 px-4 sm:px-6 lg:px-8 flex items-center justify-center">
       <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
-        {/* Top Header Switcher */}
+
+        {/* Header */}
         <div className="bg-slate-900 text-white p-6 text-center relative">
           <img
             src="/logo.png"
@@ -536,9 +516,10 @@ export const AuthPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Form Body */}
+        {/* Form body */}
         <div className="p-6 sm:p-8">
-          {/* TAB 1: SIGN IN */}
+
+          {/* ── SIGN IN TAB ─────────────────────────────────────────────── */}
           {authTab === 'signin' && (
             <form onSubmit={handleSignIn} className="space-y-4">
               <div className="flex justify-center gap-4 text-xs font-semibold mb-2">
@@ -612,7 +593,6 @@ export const AuthPage: React.FC = () => {
                     type="button"
                     onClick={() => setShowSignInPassword(!showSignInPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-                    title={showSignInPassword ? 'Hide password' : 'Show password'}
                   >
                     {showSignInPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -625,10 +605,7 @@ export const AuthPage: React.FC = () => {
                 className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl shadow-sm transition text-sm mt-4 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isSigningIn ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Signing you in...
-                  </>
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Signing you in...</>
                 ) : (
                   'Sign In to Account'
                 )}
@@ -636,7 +613,7 @@ export const AuthPage: React.FC = () => {
 
               <div className="relative my-4">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200"></div>
+                  <div className="w-full border-t border-slate-200" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
                   <span className="bg-white px-2 text-slate-500 font-bold">Or continue with</span>
@@ -649,56 +626,38 @@ export const AuthPage: React.FC = () => {
                 className="w-full bg-white hover:bg-slate-50 text-slate-800 font-bold py-2.5 px-4 rounded-xl border border-slate-300 shadow-2xs transition text-sm flex items-center justify-center gap-2"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                  />
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                 </svg>
                 <span>Continue with Google</span>
               </button>
             </form>
           )}
 
-          {/* TAB 2: THREE-STEP REGISTRATION */}
+          {/* ── REGISTER TAB ─────────────────────────────────────────────── */}
           {authTab === 'register' && (
             <div>
               {/* Step Indicator */}
               <div className="flex items-center justify-between mb-6 px-2 text-xs font-bold">
                 <div className={`flex items-center gap-1.5 ${step >= 1 ? 'text-orange-600' : 'text-slate-400'}`}>
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
-                    1
-                  </span>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>1</span>
                   <span>Select Role</span>
                 </div>
-                <div className="h-0.5 flex-1 bg-slate-200 mx-2"></div>
+                <div className="h-0.5 flex-1 bg-slate-200 mx-2" />
                 <div className={`flex items-center gap-1.5 ${step >= 2 ? 'text-orange-600' : 'text-slate-400'}`}>
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
-                    2
-                  </span>
-                  <span>{role === 'vendor' ? 'Store Details & Email Verification' : 'Profile Info'}</span>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>2</span>
+                  <span>{role === 'vendor' ? 'Store Details' : 'Profile Info'}</span>
                 </div>
-                <div className="h-0.5 flex-1 bg-slate-200 mx-2"></div>
+                <div className="h-0.5 flex-1 bg-slate-200 mx-2" />
                 <div className={`flex items-center gap-1.5 ${step >= 3 ? 'text-orange-600' : 'text-slate-400'}`}>
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
-                    3
-                  </span>
-                  <span>Summary & Roadmap</span>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>3</span>
+                  <span>Confirm</span>
                 </div>
               </div>
 
-              {/* STEP 1: ROLE SELECTION */}
+              {/* ── STEP 1: Role selection ─────────────────────────────── */}
               {step === 1 && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-extrabold text-slate-900 text-center">
@@ -706,16 +665,13 @@ export const AuthPage: React.FC = () => {
                   </h3>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Customer Role Card */}
                     <div
                       onClick={() => setRole('customer')}
                       className={`p-5 rounded-2xl border-2 cursor-pointer transition space-y-3 ${
-                        role === 'customer'
-                          ? 'border-orange-600 bg-orange-50/70 shadow-sm'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
+                        role === 'customer' ? 'border-orange-600 bg-orange-50/70 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
                     >
-                      <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold">
+                      <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
                         <UserIcon className="w-5 h-5" />
                       </div>
                       <div>
@@ -726,16 +682,13 @@ export const AuthPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Vendor Role Card */}
                     <div
                       onClick={() => setRole('vendor')}
                       className={`p-5 rounded-2xl border-2 cursor-pointer transition space-y-3 ${
-                        role === 'vendor'
-                          ? 'border-orange-600 bg-orange-50/70 shadow-sm'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
+                        role === 'vendor' ? 'border-orange-600 bg-orange-50/70 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
                     >
-                      <div className="w-10 h-10 rounded-xl bg-orange-600 text-white flex items-center justify-center font-bold">
+                      <div className="w-10 h-10 rounded-xl bg-orange-600 text-white flex items-center justify-center">
                         <Store className="w-5 h-5" />
                       </div>
                       <div>
@@ -756,7 +709,7 @@ export const AuthPage: React.FC = () => {
                 </div>
               )}
 
-              {/* STEP 2: USER / VENDOR FORM + OTP */}
+              {/* ── STEP 2: Details + OTP ─────────────────────────────── */}
               {step === 2 && (
                 <form onSubmit={handleProceedToStep3} className="space-y-4">
                   {role === 'customer' ? (
@@ -764,71 +717,46 @@ export const AuthPage: React.FC = () => {
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
                         <input
-                          type="text"
-                          required
-                          placeholder="e.g. Babatunde Raji"
-                          value={custName}
-                          onChange={(e) => setCustName(e.target.value)}
+                          type="text" required placeholder="e.g. Babatunde Raji"
+                          value={custName} onChange={(e) => setCustName(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
-
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Email Address *</label>
                         <input
-                          type="email"
-                          required
-                          placeholder="e.g. customer@example.com"
-                          value={custEmail}
-                          onChange={(e) => setCustEmail(e.target.value)}
+                          type="email" required placeholder="e.g. customer@example.com"
+                          value={custEmail} onChange={(e) => setCustEmail(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
-
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number *</label>
                         <input
-                          type="tel"
-                          required
-                          placeholder="e.g. 0803 123 4567"
-                          value={custPhone}
-                          onChange={(e) => setCustPhone(e.target.value)}
+                          type="tel" required placeholder="e.g. 0803 123 4567"
+                          value={custPhone} onChange={(e) => setCustPhone(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
-
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Your Area in Ikorodu</label>
                         <select
-                          value={custArea}
-                          onChange={(e) => setCustArea(e.target.value)}
+                          value={custArea} onChange={(e) => setCustArea(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium"
                         >
-                          {ALL_IKORODU_AREAS.map((a) => (
-                            <option key={a} value={a}>
-                              {a}
-                            </option>
-                          ))}
+                          {ALL_IKORODU_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
                         </select>
                       </div>
-
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
                         <div className="relative">
                           <input
-                            type={showCustPassword ? 'text' : 'password'}
-                            required
-                            placeholder="••••••••"
-                            value={custPassword}
-                            onChange={(e) => setCustPassword(e.target.value)}
+                            type={showCustPassword ? 'text' : 'password'} required placeholder="••••••••"
+                            value={custPassword} onChange={(e) => setCustPassword(e.target.value)}
                             className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                           />
-                          <button
-                            type="button"
-                            onClick={() => setShowCustPassword(!showCustPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-                            title={showCustPassword ? 'Hide password' : 'Show password'}
-                          >
+                          <button type="button" onClick={() => setShowCustPassword(!showCustPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1">
                             {showCustPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
@@ -839,38 +767,26 @@ export const AuthPage: React.FC = () => {
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Business / Shop Name *</label>
                         <input
-                          type="text"
-                          required
-                          placeholder="e.g. Royal Fits Bespoke Couture"
-                          value={businessName}
-                          onChange={(e) => setBusinessName(e.target.value)}
+                          type="text" required placeholder="e.g. Royal Fits Bespoke Couture"
+                          value={businessName} onChange={(e) => setBusinessName(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
-
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">Owner Full Name *</label>
                         <input
-                          type="text"
-                          required
-                          placeholder="e.g. Adeola Ogundele"
-                          value={ownerName}
-                          onChange={(e) => setOwnerName(e.target.value)}
+                          type="text" required placeholder="e.g. Adeola Ogundele"
+                          value={ownerName} onChange={(e) => setOwnerName(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
 
-                      {/* BUSINESS EMAIL & VERIFICATION */}
+                      {/* Email + OTP */}
                       <div className="space-y-2">
-                        <label className="block text-xs font-bold text-slate-700">
-                          Business Email Address *
-                        </label>
-
+                        <label className="block text-xs font-bold text-slate-700">Business Email Address *</label>
                         <div className="relative flex items-center">
                           <input
-                            type="email"
-                            required
-                            placeholder="e.g. store@example.com"
+                            type="email" required placeholder="e.g. store@example.com"
                             value={vendorEmail}
                             onChange={(e) => {
                               setVendorEmail(e.target.value);
@@ -885,9 +801,7 @@ export const AuthPage: React.FC = () => {
                           />
                           {vendorEmail.includes('@') && vendorEmail.length >= 5 && !otpVerified && (
                             <button
-                              type="button"
-                              onClick={handleSendOTP}
-                              disabled={otpLoading}
+                              type="button" onClick={handleSendOTP} disabled={otpLoading}
                               className="absolute right-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition shadow-xs flex items-center gap-1 cursor-pointer"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
@@ -896,7 +810,6 @@ export const AuthPage: React.FC = () => {
                           )}
                         </div>
 
-                        {/* Green Verified Badge */}
                         {otpVerified && (
                           <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200 shadow-2xs">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -904,22 +817,16 @@ export const AuthPage: React.FC = () => {
                           </div>
                         )}
 
-                        {/* 6 OTP Input Boxes when OTP is sent */}
                         {otpSent && !otpVerified && (
-                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 animate-fade-in mt-2">
-                            <div className="flex items-center justify-between text-xs text-slate-700 font-medium">
-                              <span className="flex items-center gap-1 font-bold">
-                                <Mail className="w-3.5 h-3.5 text-emerald-600" /> Enter 6-digit verification code sent to your email:
-                              </span>
-                            </div>
-
+                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 mt-2">
+                            <p className="text-xs text-slate-700 font-bold flex items-center gap-1">
+                              <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                              Enter the 6-digit code sent to your email:
+                            </p>
                             <div className="flex items-center justify-between gap-1.5 max-w-xs mx-auto">
                               {otpDigits.map((digit, idx) => (
                                 <input
-                                  key={idx}
-                                  ref={inputRefs[idx]}
-                                  type="text"
-                                  maxLength={1}
+                                  key={idx} ref={inputRefs[idx]} type="text" maxLength={1}
                                   value={digit}
                                   onChange={(e) => handleDigitChange(idx, e.target.value)}
                                   onKeyDown={(e) => handleKeyDown(idx, e)}
@@ -927,24 +834,16 @@ export const AuthPage: React.FC = () => {
                                 />
                               ))}
                             </div>
-
                             {otpLoading && (
-                              <p className="text-xs text-emerald-600 font-semibold text-center animate-pulse">
-                                Verifying code...
-                              </p>
+                              <p className="text-xs text-emerald-600 font-semibold text-center animate-pulse">Verifying code...</p>
                             )}
-
                             {otpError && (
-                              <div className="space-y-1.5 text-center">
+                              <div className="text-center space-y-1.5">
                                 <p className="text-xs text-rose-600 font-bold flex items-center justify-center gap-1">
                                   <AlertCircle className="w-3.5 h-3.5" /> {otpError}
                                 </p>
-                                <button
-                                  type="button"
-                                  onClick={handleSendOTP}
-                                  disabled={otpLoading}
-                                  className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
-                                >
+                                <button type="button" onClick={handleSendOTP} disabled={otpLoading}
+                                  className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
                                   Resend Code
                                 </button>
                               </div>
@@ -953,15 +852,11 @@ export const AuthPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* WHATSAPP CONTACT NUMBER */}
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">WhatsApp / Contact Phone Number *</label>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">WhatsApp / Contact Phone *</label>
                         <input
-                          type="tel"
-                          required
-                          placeholder="e.g. 08031234567"
-                          value={vendorPhone}
-                          onChange={(e) => setVendorPhone(e.target.value)}
+                          type="tel" required placeholder="e.g. 08031234567"
+                          value={vendorPhone} onChange={(e) => setVendorPhone(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
@@ -969,31 +864,16 @@ export const AuthPage: React.FC = () => {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-1">Business Category *</label>
-                          <select
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
-                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                          >
-                            {ALL_SUBCATEGORIES.map((cat) => (
-                              <option key={cat} value={cat}>
-                                {cat}
-                              </option>
-                            ))}
+                          <select value={category} onChange={(e) => setCategory(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
+                            {ALL_SUBCATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                           </select>
                         </div>
-
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-1">Business Area *</label>
-                          <select
-                            value={area}
-                            onChange={(e) => setArea(e.target.value)}
-                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                          >
-                            {ALL_IKORODU_AREAS.map((a) => (
-                              <option key={a} value={a}>
-                                {a}
-                              </option>
-                            ))}
+                          <select value={area} onChange={(e) => setArea(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white">
+                            {ALL_IKORODU_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
                           </select>
                         </div>
                       </div>
@@ -1002,19 +882,12 @@ export const AuthPage: React.FC = () => {
                         <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
                         <div className="relative">
                           <input
-                            type={showVendorPassword ? 'text' : 'password'}
-                            required
-                            placeholder="••••••••"
-                            value={vendorPassword}
-                            onChange={(e) => setVendorPassword(e.target.value)}
+                            type={showVendorPassword ? 'text' : 'password'} required placeholder="••••••••"
+                            value={vendorPassword} onChange={(e) => setVendorPassword(e.target.value)}
                             className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                           />
-                          <button
-                            type="button"
-                            onClick={() => setShowVendorPassword(!showVendorPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-                            title={showVendorPassword ? 'Hide password' : 'Show password'}
-                          >
+                          <button type="button" onClick={() => setShowVendorPassword(!showVendorPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1">
                             {showVendorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
@@ -1023,11 +896,8 @@ export const AuthPage: React.FC = () => {
                   )}
 
                   <div className="flex items-center gap-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setStep(1)}
-                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50"
-                    >
+                    <button type="button" onClick={() => setStep(1)}
+                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50">
                       Back
                     </button>
                     <button
@@ -1041,55 +911,36 @@ export const AuthPage: React.FC = () => {
                 </form>
               )}
 
-              {/* STEP 3: REGISTRATION SUMMARY & DASHBOARD ROADMAP */}
+              {/* ── STEP 3: Summary & Confirm ────────────────────────── */}
               {step === 3 && (
                 <div className="space-y-6">
-                  {/* Summary Card */}
                   <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
                     <h4 className="font-extrabold text-sm text-slate-900 border-b border-slate-200 pb-2">
                       Registration Summary
                     </h4>
-
                     {role === 'vendor' ? (
                       <div className="space-y-2 text-slate-700">
-                        <p>
-                          <strong className="text-slate-900">Shop Name:</strong> {businessName}
-                        </p>
-                        <p>
-                          <strong className="text-slate-900">Owner Name:</strong> {ownerName}
-                        </p>
+                        <p><strong className="text-slate-900">Shop Name:</strong> {businessName}</p>
+                        <p><strong className="text-slate-900">Owner Name:</strong> {ownerName}</p>
                         <p className="flex items-center gap-1.5">
                           <strong className="text-slate-900">Email:</strong> {vendorEmail}
                           <span className="bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded text-[10px] inline-flex items-center gap-1">
                             <Check className="w-3 h-3 text-emerald-600" /> VERIFIED
                           </span>
                         </p>
-                        <p>
-                          <strong className="text-slate-900">WhatsApp:</strong> {vendorPhone}
-                        </p>
-                        <p>
-                          <strong className="text-slate-900">Category:</strong> {category}
-                        </p>
-                        <p>
-                          <strong className="text-slate-900">Location:</strong> {area}, Ikorodu
-                        </p>
+                        <p><strong className="text-slate-900">WhatsApp:</strong> {vendorPhone}</p>
+                        <p><strong className="text-slate-900">Category:</strong> {category}</p>
+                        <p><strong className="text-slate-900">Location:</strong> {area}, Ikorodu</p>
                       </div>
                     ) : (
                       <div className="space-y-2 text-slate-700">
-                        <p>
-                          <strong className="text-slate-900">Customer Name:</strong> {custName}
-                        </p>
-                        <p>
-                          <strong className="text-slate-900">Phone:</strong> {custPhone}
-                        </p>
-                        <p>
-                          <strong className="text-slate-900">Area:</strong> {custArea}
-                        </p>
+                        <p><strong className="text-slate-900">Customer Name:</strong> {custName}</p>
+                        <p><strong className="text-slate-900">Phone:</strong> {custPhone}</p>
+                        <p><strong className="text-slate-900">Area:</strong> {custArea}</p>
                       </div>
                     )}
                   </div>
 
-                  {/* Vendor Dashboard Roadmap (PRD Mandated 4 Steps) */}
                   {role === 'vendor' && (
                     <div className="bg-slate-900 text-white p-5 rounded-2xl space-y-3 border border-slate-800">
                       <div className="flex items-center gap-2">
@@ -1097,34 +948,22 @@ export const AuthPage: React.FC = () => {
                         <h4 className="font-extrabold text-sm text-white">Your Dashboard Setup Roadmap</h4>
                       </div>
                       <p className="text-xs text-slate-300">
-                        After completing registration, you will finalize these 4 quick steps in your Vendor Dashboard to go live:
+                        Complete these 4 steps in your Vendor Dashboard to go live:
                       </p>
-
                       <div className="space-y-2 text-xs">
-                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
-                          <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-black flex items-center justify-center text-[10px]">
-                            1
-                          </span>
-                          <span>Upload Cover Photo, Logo & Physical Address</span>
-                        </div>
-                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
-                          <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-black flex items-center justify-center text-[10px]">
-                            2
-                          </span>
-                          <span>Add Your Products with Prices (₦)</span>
-                        </div>
-                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
-                          <span className="w-5 h-5 rounded-full bg-amber-400 text-slate-950 font-black flex items-center justify-center text-[10px]">
-                            3
-                          </span>
-                          <span>Complete NIMC 11-Digit NIN Verification (Required)</span>
-                        </div>
-                        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
-                          <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-black flex items-center justify-center text-[10px]">
-                            4
-                          </span>
-                          <span>Submit Store for Admin Review & Launch</span>
-                        </div>
+                        {[
+                          { n: '1', label: 'Upload Cover Photo, Logo & Physical Address' },
+                          { n: '2', label: 'Add Your Products with Prices (₦)' },
+                          { n: '3', label: 'Complete NIMC 11-Digit NIN Verification (Required)', amber: true },
+                          { n: '4', label: 'Submit Store for Admin Review & Launch' },
+                        ].map(({ n, label, amber }) => (
+                          <div key={n} className="flex items-center gap-2 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                            <span className={`w-5 h-5 rounded-full ${amber ? 'bg-amber-400 text-slate-950' : 'bg-orange-600 text-white'} font-black flex items-center justify-center text-[10px]`}>
+                              {n}
+                            </span>
+                            <span>{label}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -1135,14 +974,13 @@ export const AuthPage: React.FC = () => {
                     className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-extrabold py-3.5 rounded-xl shadow-sm transition text-sm flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isSubmitting ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Creating your account...
-                      </>
+                      <><Loader2 className="w-5 h-5 animate-spin" /> Creating your account...</>
                     ) : (
                       <>
                         <CheckCircle2 className="w-5 h-5" />
-                        {role === 'vendor' ? 'Complete Registration & Open Dashboard' : 'Complete Registration & Explore IkoroduSquare'}
+                        {role === 'vendor'
+                          ? 'Complete Registration & Open Dashboard'
+                          : 'Complete Registration & Explore IkoroduSquare'}
                       </>
                     )}
                   </button>
