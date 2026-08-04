@@ -14,6 +14,12 @@ const ORDERS_KEY = 'ikorodusquare_orders_v1';
 const PROMOTIONS_KEY = 'ikorodusquare_promotions_v1';
 const SETTINGS_KEY = 'ikorodusquare_settings_v2';
 
+// ─── Delete-tracking keys ──────────────────────────────────────────────────
+// These persist the IDs of seed records the admin has explicitly deleted so
+// that getVendors() / getProducts() never re-inject them on the next read.
+const DELETED_VENDOR_IDS_KEY  = 'ikorodusquare_deleted_vendor_ids';
+const DELETED_PRODUCT_IDS_KEY = 'ikorodusquare_deleted_product_ids';
+
 export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
   {
     id: 'addr_1',
@@ -138,7 +144,8 @@ export const SEED_ENQUIRIES: Enquiry[] = [
   },
 ];
 
-// Data Mappers between TypeScript and Supabase PostgreSQL schema
+// ─── Data Mappers between TypeScript and Supabase PostgreSQL schema ────────
+
 export async function generateUniqueVendorSlug(businessName: string): Promise<string> {
   const baseSlug = (businessName || 'vendor-store')
     .toLowerCase()
@@ -400,6 +407,46 @@ function userToRow(u: User) {
   };
 }
 
+// ─── Internal helpers for delete-tracking ─────────────────────────────────
+
+function getDeletedVendorIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_VENDOR_IDS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDeletedVendorId(vendorId: string): void {
+  try {
+    const ids = getDeletedVendorIds();
+    ids.add(vendorId);
+    localStorage.setItem(DELETED_VENDOR_IDS_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getDeletedProductIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_PRODUCT_IDS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDeletedProductId(productId: string): void {
+  try {
+    const ids = getDeletedProductIds();
+    ids.add(productId);
+    localStorage.setItem(DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export class StorageManager {
   // Recovery script function: Repairs orphaned vendor users in public.users without corresponding public.vendors records
   static async repairOrphanedVendorsAsync(): Promise<number> {
@@ -458,7 +505,6 @@ export class StorageManager {
         const vendorExists = (uEmail && existingEmails.has(uEmail)) || (uVendorId && existingVendorIds.has(uVendorId));
 
         if (vendorExists) {
-          // Vendor already exists in public.vendors table! Do not duplicate.
           const existingVendor = existingVendors.find(
             (v) => (uEmail && v.email?.toLowerCase().trim() === uEmail) || (uVendorId && v.id === uVendorId)
           );
@@ -469,8 +515,7 @@ export class StorageManager {
           continue;
         }
 
-        // Vendor user exists in public.users, but NO corresponding record in public.vendors!
-        console.warn(`⚠️ [Repair Script] Orphaned vendor user found! Email: "${u.email}", User ID: "${u.id}". Repairing and creating record in public.vendors...`);
+        console.warn(`⚠️ [Repair Script] Orphaned vendor user found! Email: "${u.email}", User ID: "${u.id}". Repairing...`);
 
         const rawName = u.name || (u.email ? u.email.split('@')[0] : 'Vendor Store');
         const baseSlug = rawName
@@ -495,7 +540,7 @@ export class StorageManager {
           businessName: rawName,
           ownerName: rawName,
           email: u.email || '',
-          emailVerified: true, // as requested: email_verified = true
+          emailVerified: true,
           whatsapp: u.phone || '',
           phone: u.phone || '',
           category: 'Lifestyle',
@@ -506,8 +551,8 @@ export class StorageManager {
           address: `${u.area || 'Ikorodu'}, Ikorodu, Lagos State`,
           coverPhotoURL: 'https://images.unsplash.com/photo-1556742049-0a670f4a4591?auto=format&fit=crop&w=1000&q=80',
           logoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
-          status: 'pending', // as requested: status = 'pending'
-          isLive: false, // as requested: is_live = false
+          status: 'pending',
+          isLive: false,
           isPremium: false,
           ninVerified: false,
           isFeatured: false,
@@ -535,8 +580,6 @@ export class StorageManager {
           repairedCount++;
           existingEmails.add(uEmail);
           existingVendorIds.add(newVendorId);
-
-          // Update public.users table with vendor_id link
           await supabase.from('users').update({ vendor_id: newVendorId }).eq('id', u.id);
         }
       }
@@ -562,7 +605,6 @@ export class StorageManager {
     }
 
     try {
-      // 0. Run one-time repair function to fix any existing orphaned vendor users in public.users
       await this.repairOrphanedVendorsAsync();
 
       // 1. Fetch & Sync Vendors
@@ -574,7 +616,6 @@ export class StorageManager {
         localStorage.setItem(VENDORS_KEY, JSON.stringify(fetched));
         if (onUpdate) onUpdate();
       } else {
-        // Seed initial vendors
         console.log('[Supabase] Seeding initial vendors to Supabase...');
         for (const v of SEED_VENDORS) {
           await supabase.from('vendors').upsert(vendorToRow(v));
@@ -658,6 +699,9 @@ export class StorageManager {
     }
   }
 
+  // ── FIXED: getVendors ────────────────────────────────────────────────────
+  // Seed records the admin has explicitly deleted are tracked in
+  // DELETED_VENDOR_IDS_KEY so they are never re-injected on subsequent reads.
   static getVendors(): Vendor[] {
     try {
       const data = localStorage.getItem(VENDORS_KEY);
@@ -665,11 +709,16 @@ export class StorageManager {
         localStorage.setItem(VENDORS_KEY, JSON.stringify(SEED_VENDORS));
         return SEED_VENDORS;
       }
+
       const list: Vendor[] = JSON.parse(data);
-      const existingIds = new Set(list.map((v) => v.id));
+      const existingIds    = new Set(list.map((v) => v.id));
+      const deletedIds     = getDeletedVendorIds();
+
       let updated = false;
       for (const sv of SEED_VENDORS) {
-        if (!existingIds.has(sv.id)) {
+        // Only re-inject a seed vendor when it is genuinely missing AND was
+        // never explicitly deleted by the admin.
+        if (!existingIds.has(sv.id) && !deletedIds.has(sv.id)) {
           list.push(sv);
           updated = true;
         }
@@ -693,7 +742,7 @@ export class StorageManager {
     return this.getVendors().find((v) => {
       const vSlug = v.slug.toLowerCase().replace(/[^a-z0-9]/g, '');
       const vName = v.businessName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const vId = v.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const vId   = v.id.toLowerCase().replace(/[^a-z0-9]/g, '');
       return vSlug === cleanSlug || vName.includes(cleanSlug) || vId === cleanSlug;
     });
   }
@@ -703,12 +752,9 @@ export class StorageManager {
   }
 
   static async addVendorAsync(newVendor: Vendor): Promise<Vendor> {
-    // Ensure URL-safe unique slug is assigned
     if (!newVendor.slug) {
       newVendor.slug = await generateUniqueVendorSlug(newVendor.businessName || 'vendor');
     }
-
-    // Default status to 'pending' and isLive to false for new vendor registrations
     if (!newVendor.status) newVendor.status = 'pending';
     if (newVendor.isLive === undefined) newVendor.isLive = false;
 
@@ -742,7 +788,7 @@ export class StorageManager {
         }
       } catch (error: any) {
         console.error('❌ Exception writing vendor to Supabase:', error);
-        throw error; // Re-throw error to abort registration if database write fails
+        throw error;
       }
     }
 
@@ -788,13 +834,27 @@ export class StorageManager {
     return updated;
   }
 
+  // ── FIXED: deleteVendorAsync ─────────────────────────────────────────────
+  // Persists the vendor ID (and all its product IDs) into the deleted-IDs
+  // tombstone lists so getVendors() / getProducts() never re-inject them.
   static async deleteVendorAsync(vendorId: string): Promise<void> {
+    // 1. Record the vendor ID as deleted before modifying the list
+    persistDeletedVendorId(vendorId);
+
+    // 2. Also tombstone every seed product belonging to this vendor
+    const productsToRemove = this.getProducts().filter((p) => p.vendorId === vendorId);
+    for (const p of productsToRemove) {
+      persistDeletedProductId(p.id);
+    }
+
+    // 3. Remove from localStorage
     const vendors = this.getVendors().filter((v) => v.id !== vendorId);
     this.saveVendors(vendors);
 
     const products = this.getProducts().filter((p) => p.vendorId !== vendorId);
     this.saveProducts(products);
 
+    // 4. Remove from Supabase
     if (supabase) {
       try {
         await supabase.from('vendors').delete().eq('id', vendorId);
@@ -809,6 +869,9 @@ export class StorageManager {
     this.deleteVendorAsync(vendorId);
   }
 
+  // ── FIXED: getProducts ───────────────────────────────────────────────────
+  // Respects both the product-level and vendor-level deleted-ID tombstones so
+  // seed products are never re-injected after deletion.
   static getProducts(): Product[] {
     try {
       const data = localStorage.getItem(PRODUCTS_KEY);
@@ -816,11 +879,21 @@ export class StorageManager {
         localStorage.setItem(PRODUCTS_KEY, JSON.stringify(SEED_PRODUCTS));
         return SEED_PRODUCTS;
       }
-      const list: Product[] = JSON.parse(data);
-      const existingIds = new Set(list.map((p) => p.id));
+
+      const list: Product[]      = JSON.parse(data);
+      const existingIds          = new Set(list.map((p) => p.id));
+      const deletedProductIds    = getDeletedProductIds();
+      const deletedVendorIds     = getDeletedVendorIds();
+
       let updated = false;
       for (const sp of SEED_PRODUCTS) {
-        if (!existingIds.has(sp.id)) {
+        // Re-inject only if: not already present AND not explicitly deleted
+        // AND its parent vendor was not deleted.
+        if (
+          !existingIds.has(sp.id) &&
+          !deletedProductIds.has(sp.id) &&
+          !deletedVendorIds.has(sp.vendorId)
+        ) {
           list.push(sp);
           updated = true;
         }
@@ -881,7 +954,11 @@ export class StorageManager {
     return updated;
   }
 
+  // ── FIXED: deleteProductAsync ────────────────────────────────────────────
+  // Tombstones the product ID so getProducts() never re-injects it.
   static async deleteProductAsync(productId: string): Promise<void> {
+    persistDeletedProductId(productId);
+
     const products = this.getProducts().filter((p) => p.id !== productId);
     this.saveProducts(products);
 
@@ -1176,11 +1253,10 @@ export class StorageManager {
     this.updateVendor(vendor);
   }
 
-  // --- ADMIN SETTINGS ---
+  // ── ADMIN SETTINGS ───────────────────────────────────────────────────────
 
   static getSettings(): AdminSettings {
     try {
-      // Clear legacy localStorage keys from prior versions
       try {
         localStorage.removeItem('ikorodusquare_settings');
         localStorage.removeItem('ikorodusquare_settings_v1');
@@ -1195,7 +1271,6 @@ export class StorageManager {
       }
       const settings = JSON.parse(data);
 
-      // Auto-migrate legacy Moniepoint/old bank details if found in user's saved storage
       let needsMigration = false;
       if (!settings.bankName || settings.bankName.includes('Moniepoint')) {
         settings.bankName = DEFAULT_ADMIN_SETTINGS.bankName;
@@ -1235,7 +1310,7 @@ export class StorageManager {
     }
   }
 
-  // --- PROMOTION MANAGEMENT & AUTOMATED EXPIRY ---
+  // ── PROMOTION MANAGEMENT & AUTOMATED EXPIRY ──────────────────────────────
 
   static getPromotions(): Promotion[] {
     try {
@@ -1281,7 +1356,7 @@ export class StorageManager {
     const promotions = this.getPromotions();
     const existingIndex = promotions.findIndex((p) => p.id === promo.id);
 
-    const startDate = new Date().toISOString();
+    const startDate  = new Date().toISOString();
     const expiryDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString();
 
     const updatedPromo: Promotion = {
@@ -1299,8 +1374,7 @@ export class StorageManager {
 
     this.savePromotions(promotions);
 
-    // Synchronize promotion side effects on assets
-    const vendors = this.getVendors();
+    const vendors  = this.getVendors();
     const products = this.getProducts();
 
     if (updatedPromo.promotionType === 'sponsored_vendor') {
@@ -1359,9 +1433,9 @@ export class StorageManager {
     const now = Date.now();
     let hasChanges = false;
 
-    const vendors = this.getVendors();
+    const vendors  = this.getVendors();
     const products = this.getProducts();
-    let banners = this.getBanners();
+    let banners    = this.getBanners();
 
     for (let i = 0; i < promotions.length; i++) {
       const p = promotions[i];
@@ -1371,7 +1445,6 @@ export class StorageManager {
           p.status = 'expired';
           hasChanges = true;
 
-          // Remove promotion effects automatically
           if (p.promotionType === 'sponsored_vendor') {
             const hasOtherActive = promotions.some(
               (other) => other.id !== p.id && other.vendorId === p.vendorId && other.promotionType === 'sponsored_vendor' && other.status === 'active'
@@ -1434,7 +1507,7 @@ export class StorageManager {
     }
 
     if (newStatus === 'active') {
-      p.startDate = new Date().toISOString();
+      p.startDate  = new Date().toISOString();
       p.expiryDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString();
     }
 
@@ -1443,10 +1516,9 @@ export class StorageManager {
     if (newStatus === 'active') {
       this.activatePromotion(p);
     } else {
-      // For any non-active status (rejected, expired, cancelled, pending_verification), remove active side-effects
-      const vendors = this.getVendors();
+      const vendors  = this.getVendors();
       const products = this.getProducts();
-      let banners = this.getBanners();
+      let banners    = this.getBanners();
 
       if (p.promotionType === 'sponsored_vendor') {
         const hasOtherActive = promotions.some(
