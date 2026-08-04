@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { User, Vendor, Product, Review, Enquiry, BannerAd, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS } from '../types';
 import { StorageManager, rowToVendor } from '../data/mockStorage';
 import { ApiService } from '../services/api';
@@ -96,11 +96,11 @@ const VENDORS_KEY = 'ikorodusquare_vendors_v1';
  * Respects the deleted-vendor tombstone list so soft-deleted records are
  * never re-injected from the database.
  */
-async function syncVendorsFromSupabase(): Promise<void> {
-  if (!supabase) return;
+async function syncVendorsFromSupabase(): Promise<Vendor[]> {
+  if (!supabase) return [];
   try {
     const { data, error } = await supabase.from('vendors').select('*');
-    if (error || !data) return;
+    if (error || !data) return [];
 
     const deletedIds = getDeletedVendorIds();
     const fresh = data
@@ -108,8 +108,10 @@ async function syncVendorsFromSupabase(): Promise<void> {
       .filter((v: Vendor) => !deletedIds.has(v.id));
 
     localStorage.setItem(VENDORS_KEY, JSON.stringify(fresh));
+    return fresh;
   } catch (e) {
     console.warn('[syncVendorsFromSupabase] failed, using cached data:', e);
+    return [];
   }
 }
 
@@ -233,6 +235,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'en';
   });
 
+  // Ref used by the realtime subscription to avoid calling setState on an
+  // unmounted component.
+  const isMountedRef = useRef(true);
+
   // ── Language ───────────────────────────────────────────────────────────
 
   const setLanguage = (lang: Language) => {
@@ -265,22 +271,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Core data refresh ──────────────────────────────────────────────────
   //
-  // FIX: refreshData is now async and always pulls vendors fresh from
-  // Supabase before updating React state. This ensures a newly registered
-  // vendor (status='pending') is immediately visible in the approval queue
-  // without waiting for the realtime subscription to fire.
+  // Always pulls vendors fresh from Supabase first so the approval queue
+  // reflects what is actually in the database, not a stale localStorage
+  // snapshot that may predate the most recent registration.
 
   const refreshData = async (): Promise<void> => {
     StorageManager.checkAndSyncPromotionExpiries();
 
-    // Always re-fetch the vendor list from Supabase so the approval queue
-    // reflects what is actually in the database, not a stale localStorage
-    // snapshot that may predate the most recent registration.
-    await syncVendorsFromSupabase();
+    // Re-fetch vendor list from Supabase so the approval queue reflects
+    // what is actually in the database.
+    const freshVendors = await syncVendorsFromSupabase();
 
     setPromotions(StorageManager.getPromotions());
     setAdminSettings(StorageManager.getSettings());
-    setVendors(StorageManager.getVendors());
+    // Use the freshly fetched list when available, fall back to localStorage.
+    setVendors(freshVendors.length > 0 ? freshVendors : StorageManager.getVendors());
     setProducts(StorageManager.getProducts());
     setReviews(StorageManager.getReviews());
     setEnquiries(StorageManager.getEnquiries());
@@ -382,22 +387,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ── Boot effect ────────────────────────────────────────────────────────
-  //
-  // FIX: initFirestoreSync's callback and its .then() both previously called
-  // refreshData(), creating a race condition where two concurrent re-fetches
-  // would stomp each other and could miss a newly registered vendor.
-  //
-  // Now only the .then() path calls refreshData() (once). The callback only
-  // updates the syncComplete flag and calls checkHydrationComplete so the
-  // loading spinner clears at the right time. The extra re-fetch in the
-  // callback is removed.
 
   useEffect(() => {
-    let isMounted = true;
+    isMountedRef.current = true;
 
     // Populate UI immediately from local cache while the network call runs
     const seedFromCache = () => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       setPromotions(StorageManager.getPromotions());
       setAdminSettings(StorageManager.getSettings());
       setVendors(StorageManager.getVendors());
@@ -414,30 +410,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let syncComplete = false;
 
     const checkHydrationComplete = () => {
-      if (authComplete && syncComplete && isMounted) setIsLoading(false);
+      if (authComplete && syncComplete && isMountedRef.current) setIsLoading(false);
     };
 
     // Safety timer so the loading state never hangs when offline
     const fallbackTimer = setTimeout(() => {
-      if (isMounted) setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
     }, 2500);
 
-    // FIX: only one code path calls refreshData() after the initial sync.
-    // The callback simply marks sync as done; the .then() does the single
-    // authoritative fetch from Supabase and updates React state.
     StorageManager.initFirestoreSync(() => {
-      // Callback fires when the realtime subscription delivers its first
-      // event. Just mark sync complete — the .then() already handled the
-      // initial data load.
-      if (isMounted) {
+      if (isMountedRef.current) {
         syncComplete = true;
         checkHydrationComplete();
       }
     })
       .then(async () => {
-        if (isMounted) {
-          // Single authoritative refresh: pulls vendors fresh from Supabase
-          // so a vendor who registered moments ago already appears pending.
+        if (isMountedRef.current) {
           await refreshData();
           syncComplete = true;
           checkHydrationComplete();
@@ -445,11 +433,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
       .catch((e) => {
         console.warn('[Hydration Sync Warning]:', e);
-        if (isMounted) {
+        if (isMountedRef.current) {
           syncComplete = true;
           checkHydrationComplete();
         }
       });
+
+    // ── FIX: Realtime vendor subscription ─────────────────────────────
+    //
+    // The previous realtime channel (inside initFirestoreSync) only wrote to
+    // localStorage — it never updated React state. So the admin approval queue
+    // would not show a newly registered vendor unless the admin manually
+    // refreshed the browser.
+    //
+    // This subscription lives in the context so it can call setVendors()
+    // directly whenever any row in the vendors table is inserted, updated,
+    // or deleted. This means:
+    //   • New vendor registers  → appears in approval queue instantly
+    //   • Admin approves        → status badge updates for all open sessions
+    //   • Admin deletes         → vendor disappears from directory immediately
+    //
+    // Deleted-vendor tombstones are respected so soft-deleted seed records
+    // are never re-injected by the realtime event.
+
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    if (supabase) {
+      realtimeChannel = supabase
+        .channel('context:vendors:all')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'vendors' },
+          async () => {
+            if (!isMountedRef.current) return;
+            // Re-fetch the full vendor list from Supabase on any change.
+            // This is simpler and safer than trying to patch a single row
+            // into the existing state array.
+            const fresh = await syncVendorsFromSupabase();
+            if (isMountedRef.current) {
+              setVendors(fresh.length > 0 ? fresh : StorageManager.getVendors());
+            }
+          }
+        )
+        .subscribe();
+    }
 
     // Auth session restoration
     let authSubscription: { unsubscribe: () => void } | null = null;
@@ -457,10 +484,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabase.auth
         .getSession()
         .then(async ({ data: { session } }) => {
-          if (session?.user && isMounted) {
+          if (session?.user && isMountedRef.current) {
             const syncedUser = await resolveUserFromSupabase(session.user);
-            if (isMounted) setCurrentUser(syncedUser);
-          } else if (isMounted) {
+            if (isMountedRef.current) setCurrentUser(syncedUser);
+          } else if (isMountedRef.current) {
             setCurrentUser(null);
           }
           authComplete = true;
@@ -468,14 +495,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch((e) => {
           console.warn('[Hydration Auth Error]:', e);
-          if (isMounted) {
+          if (isMountedRef.current) {
             authComplete = true;
             checkHydrationComplete();
           }
         });
 
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (!isMounted) return;
+        if (!isMountedRef.current) return;
 
         if (event === 'PASSWORD_RECOVERY') {
           setCurrentPageState('reset-password');
@@ -490,9 +517,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (session?.user) {
           const syncedUser = await resolveUserFromSupabase(session.user);
-          if (isMounted) setCurrentUser(syncedUser);
+          if (isMountedRef.current) setCurrentUser(syncedUser);
         } else {
-          if (isMounted) setCurrentUser(null);
+          if (isMountedRef.current) setCurrentUser(null);
         }
       });
 
@@ -503,9 +530,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
       clearTimeout(fallbackTimer);
       if (authSubscription) authSubscription.unsubscribe();
+      // Clean up the vendor realtime channel on unmount
+      if (realtimeChannel && supabase) {
+        supabase.removeChannel(realtimeChannel);
+      }
     };
   }, []);
 
