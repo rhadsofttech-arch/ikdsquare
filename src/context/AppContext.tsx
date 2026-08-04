@@ -1,46 +1,10 @@
-/**
- * AppContext.tsx — Rewritten
- *
- * SINGLE SOURCE OF TRUTH: Supabase Auth.
- *
- * Auth lifecycle:
- *   1. Mount → supabase.auth.getSession() → resolveUserFromSupabase() → setCurrentUser()
- *   2. Any future auth event → onAuthStateChange → resolveUserFromSupabase() → setCurrentUser()
- *   3. Signed out → setCurrentUser(null)
- *
- * `isAuthLoading` is true until step 1 completes; components MUST NOT render
- * auth-gated content while it is true.
- *
- * Components MUST NOT call setCurrentUser() themselves.
- * Components MUST NOT read auth state from localStorage.
- */
-
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-} from 'react';
-import {
-  User,
-  Vendor,
-  Product,
-  Review,
-  Enquiry,
-  BannerAd,
-  Promotion,
-  PromotionStatus,
-  AdminSettings,
-  DEFAULT_ADMIN_SETTINGS,
-} from '../types';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { User, Vendor, Product, Review, Enquiry, BannerAd, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS } from '../types';
 import { StorageManager, rowToVendor } from '../data/mockStorage';
 import { ApiService } from '../services/api';
 import { supabase } from '../services/supabase';
 import { Language, TRANSLATIONS } from '../data/translations';
 import { isAdminEmail } from '../lib/admin';
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface Toast {
   id: string;
@@ -49,7 +13,7 @@ interface Toast {
   message: string;
 }
 
-export interface AppContextType {
+interface AppContextType {
   currentPage: string;
   setCurrentPage: (page: string) => void;
   activeVendorSlug: string | null;
@@ -57,14 +21,9 @@ export interface AppContextType {
   navigateToStore: (slug: string) => void;
 
   currentUser: User | null;
-  /**
-   * @deprecated — Do NOT call this from components.
-   * Auth state flows through Supabase → AppContext only.
-   * Exposed only to satisfy legacy prop signatures.
-   */
   setCurrentUser: (user: User | null) => void;
   activeVendor: Vendor | null;
-
+  
   vendors: Vendor[];
   products: Product[];
   reviews: Review[];
@@ -75,24 +34,10 @@ export interface AppContextType {
   adminSettings: AdminSettings;
   updateAdminSettings: (settings: AdminSettings) => void;
 
-  /**
-   * True while application data (vendors, products …) is being loaded.
-   * Distinct from auth loading.
-   */
+  // Loading state for Firestore & initial sync
   isLoading: boolean;
 
-  /**
-   * True while the Supabase session is being resolved on mount.
-   * Protected routes MUST NOT render until this is false.
-   */
-  isAuthLoading: boolean;
-
-  /**
-   * True once the auth session has been resolved at least once.
-   * Equivalent to !isAuthLoading after the initial resolution.
-   */
-  isAuthInitialized: boolean;
-
+  // Search & Filter State
   searchType: 'business' | 'product';
   setSearchType: (type: 'business' | 'product') => void;
   searchQuery: string;
@@ -102,24 +47,19 @@ export interface AppContextType {
   selectedArea: string;
   setSelectedArea: (area: string) => void;
 
+  // Actions
   refreshData: () => void;
   toggleFavorite: (vendorId: string) => void;
-  showToast: (
-    type: 'success' | 'error' | 'info',
-    title: string,
-    message: string,
-  ) => void;
+  showToast: (type: 'success' | 'error' | 'info', title: string, message: string) => void;
   toasts: Toast[];
   removeToast: (id: string) => void;
 
+  // Promotion Actions
   createPromotionRequest: (promo: Promotion) => Promise<void>;
   activatePromotion: (promo: Promotion) => Promise<void>;
-  updatePromotionStatus: (
-    id: string,
-    newStatus: PromotionStatus,
-    extendDays?: number,
-  ) => Promise<void>;
+  updatePromotionStatus: (id: string, newStatus: PromotionStatus, extendDays?: number) => Promise<void>;
 
+  // Admin Actions
   approveVendor: (vendorId: string) => Promise<void>;
   unapproveVendor: (vendorId: string) => Promise<void>;
   toggleVendorApproval: (vendorId: string) => Promise<void>;
@@ -128,189 +68,163 @@ export interface AppContextType {
   rejectVendor: (vendorId: string, reason: string) => Promise<void>;
   deleteVendor: (vendorId: string) => Promise<void>;
 
+  // Store Setup Modal State
   showSetupModal: boolean;
   setShowSetupModal: (show: boolean) => void;
 
+  // Admin Mode Toggle for quick testing
   isAdminMode: boolean;
   setIsAdminMode: (admin: boolean) => void;
 
+  // Language Translation State
   language: Language;
   setLanguage: (lang: Language) => void;
   t: (key: string, defaultText?: string) => string;
 }
 
-// ─── Context ───────────────────────────────────────────────────────────────────
-
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// ─── Route helpers ──────────────────────────────────────────────────────────────
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const getInitialPageAndSlug = () => {
+    if (typeof window === 'undefined') return { page: 'home', slug: null, adminMode: false };
 
-/**
- * Derive the initial page/slug from the URL only.
- * Never reads auth state from localStorage — that caused the stale-dashboard bug.
- * Never restores 'dashboard', 'profile', or 'auth' from localStorage — those
- * pages are auth-gated and must be decided after the session resolves.
- */
-function getInitialNav(): {
-  page: string;
-  slug: string | null;
-  adminMode: boolean;
-} {
-  if (typeof window === 'undefined')
-    return { page: 'home', slug: null, adminMode: false };
-
-  // 1. Query params
-  const params = new URLSearchParams(window.location.search);
-  const storeQ = params.get('store') ?? params.get('vendor') ?? params.get('shop');
-  if (storeQ)
-    return {
-      page: 'store',
-      slug: decodeURIComponent(storeQ.trim()),
-      adminMode: false,
-    };
-  const pageQ = params.get('page')?.toLowerCase();
-  if (pageQ) {
-    if (pageQ === 'admin' || pageQ.startsWith('admin/'))
-      return { page: 'admin', slug: null, adminMode: true };
-    // auth-gated pages are intentionally NOT restored from query param here;
-    // they'll redirect correctly once auth resolves via the useEffect below.
-  }
-
-  // 2. Hash
-  if (window.location.hash?.startsWith('#')) {
-    const raw = window.location.hash.replace(/^#\/?/, '').trim();
-    const lower = raw.toLowerCase();
-    if (lower === 'admin' || lower.startsWith('admin/'))
-      return { page: 'admin', slug: null, adminMode: true };
-    if (lower.startsWith('store/'))
-      return {
-        page: 'store',
-        slug: decodeURIComponent(raw.substring(6).trim()),
-        adminMode: false,
-      };
-    if (lower.startsWith('vendor/'))
-      return {
-        page: 'store',
-        slug: decodeURIComponent(raw.substring(7).trim()),
-        adminMode: false,
-      };
-    if (lower.startsWith('shop/'))
-      return {
-        page: 'store',
-        slug: decodeURIComponent(raw.substring(5).trim()),
-        adminMode: false,
-      };
-    // Supabase password-recovery token arrives via hash
-    if (lower.includes('access_token') || lower.includes('type=recovery'))
-      return { page: 'reset-password', slug: null, adminMode: false };
-  }
-
-  // 3. Pathname
-  const path = window.location.pathname;
-  const lower = path.toLowerCase();
-  if (
-    lower === '/admin' ||
-    lower === '/admin/' ||
-    lower.startsWith('/admin/')
-  )
-    return { page: 'admin', slug: null, adminMode: true };
-  if (lower.startsWith('/store/'))
-    return {
-      page: 'store',
-      slug: decodeURIComponent(path.substring(7).replace(/\/$/, '')),
-      adminMode: false,
-    };
-  if (lower.startsWith('/vendor/'))
-    return {
-      page: 'store',
-      slug: decodeURIComponent(path.substring(8).replace(/\/$/, '')),
-      adminMode: false,
-    };
-  if (lower.startsWith('/shop/'))
-    return {
-      page: 'store',
-      slug: decodeURIComponent(path.substring(6).replace(/\/$/, '')),
-      adminMode: false,
-    };
-
-  // 4. Saved page from localStorage — only non-auth pages
-  try {
-    const savedPage = localStorage.getItem('ikorodusquare_last_page');
-    const savedSlug = localStorage.getItem('ikorodusquare_last_slug');
-    if (savedPage) {
-      if (savedPage === 'admin')
-        return { page: 'admin', slug: null, adminMode: true };
-      if (savedPage === 'store' && savedSlug)
-        return { page: 'store', slug: savedSlug, adminMode: false };
-      if (savedPage === 'home')
-        return { page: 'home', slug: null, adminMode: false };
-      // 'dashboard', 'profile', 'auth' are intentionally excluded here.
-      // Auth-gated pages are only navigated to AFTER isAuthLoading is false.
+    // 1. Check Query Params (?store=slug or ?vendor=slug or ?shop=slug)
+    if (window.location.search) {
+      const searchParams = new URLSearchParams(window.location.search);
+      const storeQuery = searchParams.get('store') || searchParams.get('vendor') || searchParams.get('shop');
+      if (storeQuery) {
+        return { page: 'store', slug: decodeURIComponent(storeQuery.trim()), adminMode: false };
+      }
+      const pageQuery = searchParams.get('page');
+      if (pageQuery) {
+        const p = pageQuery.toLowerCase();
+        if (p === 'admin' || p.startsWith('admin/')) return { page: 'admin', slug: null, adminMode: true };
+        if (p === 'dashboard' || p === 'vendor-dashboard') return { page: 'dashboard', slug: null, adminMode: false };
+        if (p === 'profile' || p === 'user-profile') return { page: 'profile', slug: null, adminMode: false };
+        if (p === 'auth' || p === 'login') return { page: 'auth', slug: null, adminMode: false };
+        if (p === 'forgot-password' || p === 'forgot') return { page: 'forgot-password', slug: null, adminMode: false };
+        if (p === 'reset-password' || p === 'reset') return { page: 'reset-password', slug: null, adminMode: false };
+      }
     }
-  } catch {
-    /* ignore */
-  }
 
-  return { page: 'home', slug: null, adminMode: false };
-}
+    // 2. Check Hash (#/admin, #/store/slug, #/vendor/slug, #/dashboard, etc.)
+    if (window.location.hash && window.location.hash.startsWith('#')) {
+      const rawHash = window.location.hash.replace(/^#\/?/, '').trim();
+      const hashLower = rawHash.toLowerCase();
+      if (hashLower === 'admin' || hashLower.startsWith('admin/')) {
+        return { page: 'admin', slug: null, adminMode: true };
+      }
+      if (hashLower.startsWith('store/')) {
+        const slug = decodeURIComponent(rawHash.substring(6).trim());
+        return { page: 'store', slug: slug || null, adminMode: false };
+      }
+      if (hashLower.startsWith('vendor/')) {
+        const slug = decodeURIComponent(rawHash.substring(7).trim());
+        return { page: 'store', slug: slug || null, adminMode: false };
+      }
+      if (hashLower.startsWith('shop/')) {
+        const slug = decodeURIComponent(rawHash.substring(5).trim());
+        return { page: 'store', slug: slug || null, adminMode: false };
+      }
+      if (hashLower === 'auth' || hashLower === 'login') {
+        return { page: 'auth', slug: null, adminMode: false };
+      }
+      if (hashLower === 'forgot-password' || hashLower === 'forgot') {
+        return { page: 'forgot-password', slug: null, adminMode: false };
+      }
+      if (hashLower === 'reset-password' || hashLower === 'reset' || hashLower.includes('access_token')) {
+        return { page: 'reset-password', slug: null, adminMode: false };
+      }
+      if (hashLower === 'dashboard' || hashLower === 'vendor-dashboard') {
+        return { page: 'dashboard', slug: null, adminMode: false };
+      }
+      if (hashLower === 'profile' || hashLower === 'user-profile') {
+        return { page: 'profile', slug: null, adminMode: false };
+      }
+      if (hashLower === 'home' || hashLower === '') {
+        return { page: 'home', slug: null, adminMode: false };
+      }
+    }
 
-function persistNav(page: string, slug: string | null = null): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem('ikorodusquare_last_page', page);
-    if (slug) localStorage.setItem('ikorodusquare_last_slug', slug);
-    else localStorage.removeItem('ikorodusquare_last_slug');
-  } catch {
-    /* ignore */
-  }
+    // 3. Check Pathname (/admin, /admin/..., /store/slug, /vendor/slug, etc.)
+    const path = window.location.pathname;
+    const pathLower = path.toLowerCase();
+    if (pathLower === '/admin' || pathLower === '/admin/' || pathLower.startsWith('/admin/')) {
+      return { page: 'admin', slug: null, adminMode: true };
+    }
+    if (pathLower.startsWith('/store/')) {
+      const slug = decodeURIComponent(path.substring(7).trim().replace(/\/$/, ''));
+      return { page: 'store', slug: slug || null, adminMode: false };
+    }
+    if (pathLower.startsWith('/vendor/')) {
+      const slug = decodeURIComponent(path.substring(8).trim().replace(/\/$/, ''));
+      return { page: 'store', slug: slug || null, adminMode: false };
+    }
+    if (pathLower.startsWith('/shop/')) {
+      const slug = decodeURIComponent(path.substring(6).trim().replace(/\/$/, ''));
+      return { page: 'store', slug: slug || null, adminMode: false };
+    }
+    if (pathLower === '/auth' || pathLower === '/login') {
+      return { page: 'auth', slug: null, adminMode: false };
+    }
+    if (pathLower === '/dashboard' || pathLower === '/vendor-dashboard') {
+      return { page: 'dashboard', slug: null, adminMode: false };
+    }
+    if (pathLower === '/profile' || pathLower === '/user-profile') {
+      return { page: 'profile', slug: null, adminMode: false };
+    }
 
-  const target =
-    page === 'admin'
-      ? '/admin'
-      : page === 'store' && slug
-      ? `/store/${encodeURIComponent(slug)}`
-      : page === 'dashboard'
-      ? '/dashboard'
-      : page === 'auth'
-      ? '/auth'
-      : page === 'profile'
-      ? '/profile'
-      : '/';
+    // 4. Fallback to localStorage saved page state
+    try {
+      const savedPage = localStorage.getItem('ikorodusquare_last_page');
+      const savedSlug = localStorage.getItem('ikorodusquare_last_slug');
+      if (savedPage) {
+        if (savedPage === 'admin') return { page: 'admin', slug: null, adminMode: true };
+        if (savedPage === 'store' && savedSlug) return { page: 'store', slug: savedSlug, adminMode: false };
+        if (['auth', 'dashboard', 'profile', 'home'].includes(savedPage)) {
+          return { page: savedPage, slug: null, adminMode: false };
+        }
+      }
+    } catch (e) {
+      console.error('Failed to read saved page from localStorage', e);
+    }
 
-  if (
-    window.location.pathname !== target ||
-    window.location.hash !== ''
-  ) {
-    window.history.pushState({}, '', target);
-  }
-}
+    return { page: 'home', slug: null, adminMode: false };
+  };
 
-// ─── Provider ───────────────────────────────────────────────────────────────────
+  const updateUrlAndStorage = (page: string, slug: string | null = null) => {
+    if (typeof window === 'undefined') return;
 
-export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
-  const initialNav = getInitialNav();
+    try {
+      localStorage.setItem('ikorodusquare_last_page', page);
+      if (slug) {
+        localStorage.setItem('ikorodusquare_last_slug', slug);
+      } else {
+        localStorage.removeItem('ikorodusquare_last_slug');
+      }
+    } catch (e) {
+      console.error('Failed to save route state to localStorage', e);
+    }
 
-  // ── Navigation state ────────────────────────────────────────────────────────
+    let targetPath = '/';
+    if (page === 'admin') targetPath = '/admin';
+    else if (page === 'store' && slug) targetPath = `/store/${encodeURIComponent(slug)}`;
+    else if (page === 'dashboard') targetPath = '/dashboard';
+    else if (page === 'auth') targetPath = '/auth';
+    else if (page === 'profile') targetPath = '/profile';
+    else targetPath = '/';
+
+    if (window.location.pathname !== targetPath || window.location.hash !== '') {
+      window.history.pushState({}, '', targetPath);
+    }
+  };
+
+  const initialNav = getInitialPageAndSlug();
   const [currentPage, setCurrentPageState] = useState<string>(initialNav.page);
-  const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(
-    initialNav.slug,
-  );
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(
-    initialNav.adminMode,
-  );
+  const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(initialNav.slug);
 
-  // ── Auth state ─────────────────────────────────────────────────────────────
-  //    isAuthLoading: true from mount until the first getSession() resolves.
-  //    isAuthInitialized: flips to true once and stays true forever.
-  //    currentUser: populated by resolveUserFromSupabase; null when signed out.
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [isAuthInitialized, setIsAuthInitialized] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-
-  // ── Application data state ─────────────────────────────────────────────────
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -318,463 +232,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [banners, setBanners] = useState<BannerAd[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() =>
-    StorageManager.getSettings(),
-  );
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => StorageManager.getSettings());
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // ── UI state ───────────────────────────────────────────────────────────────
-  const [searchType, setSearchType] = useState<'business' | 'product'>(
-    'business',
-  );
+  // Search & Filter State
+  const [searchType, setSearchType] = useState<'business' | 'product'>('business');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedArea, setSelectedArea] = useState<string>('All');
+
+  // Admin & Modal & Language
   const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
+  const [isAdminMode, setIsAdminMode] = useState<boolean>(initialNav.adminMode);
   const [language, setLanguageState] = useState<Language>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('ikorodusquare_lang');
-      if (saved === 'yo' || saved === 'en') return saved as Language;
+      if (saved === 'yo' || saved === 'en') return saved;
     }
     return 'en';
   });
 
-  // ─── Helpers ────────────────────────────────────────────────────────────────
-
-  const showToast = useCallback(
-    (type: 'success' | 'error' | 'info', title: string, message: string) => {
-      const id = Date.now().toString();
-      setToasts((prev) => [...prev, { id, type, title, message }]);
-      setTimeout(
-        () => setToasts((prev) => prev.filter((t) => t.id !== id)),
-        5000,
-      );
-    },
-    [],
-  );
-
-  const removeToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
-
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    if (typeof window !== 'undefined')
+    if (typeof window !== 'undefined') {
       localStorage.setItem('ikorodusquare_lang', lang);
+    }
   };
 
   const t = (key: string, defaultText?: string): string => {
     const langObj = TRANSLATIONS[language];
-    return (
-      (langObj && langObj[key]) ||
-      defaultText ||
-      TRANSLATIONS['en'][key] ||
-      key
-    );
+    if (langObj && langObj[key]) {
+      return langObj[key];
+    }
+    return defaultText || TRANSLATIONS['en'][key] || key;
   };
 
-  const refreshData = useCallback(() => {
+  const setCurrentPage = (page: string) => {
+    // Route Protection for authenticated pages
+    const isEffectiveAdmin = isAdminMode || currentUser?.role === 'admin';
+    const protectedPages = ['dashboard', 'admin', 'profile', 'user-profile'];
+    if (protectedPages.includes(page) && !currentUser && !isEffectiveAdmin && page !== 'admin') {
+      showToast('info', 'Authentication Required', 'Please sign in to access your dashboard or profile.');
+      setCurrentPageState('auth');
+      updateUrlAndStorage('auth', null);
+      return;
+    }
+
+    setCurrentPageState(page);
+    if (page === 'admin') {
+      setIsAdminMode(true);
+    }
+    updateUrlAndStorage(page, page === 'store' ? activeVendorSlug : null);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const refreshData = () => {
     StorageManager.checkAndSyncPromotionExpiries();
     setPromotions(StorageManager.getPromotions());
     setAdminSettings(StorageManager.getSettings());
-    const v = StorageManager.getVendors();
-    setVendors(v);
+    setVendors(StorageManager.getVendors());
     setProducts(StorageManager.getProducts());
     setReviews(StorageManager.getReviews());
     setEnquiries(StorageManager.getEnquiries());
     setBanners(StorageManager.getBanners());
     setFavorites(StorageManager.getFavorites());
-    setIsLoading(false);
-  }, []);
-
-  // ─── User resolution ─────────────────────────────────────────────────────────
-
-  /**
-   * Given a raw Supabase auth user, look up public.users and public.vendors,
-   * then build a fully-typed User object.
-   *
-   * This is the ONLY place a User is constructed from auth data.
-   */
-  const resolveUserFromSupabase = useCallback(
-    async (supaUser: {
-      id: string;
-      email?: string;
-      email_confirmed_at?: string | null;
-      phone?: string;
-      created_at?: string;
-      user_metadata?: Record<string, unknown>;
-    }): Promise<User> => {
-      const email = supaUser.email ?? '';
-      const isAdmin = isAdminEmail(email);
-
-      // 1. Vendor lookup: by user_id FK first, then by email
-      let matchingVendor: Vendor | null = null;
-      if (supabase) {
-        try {
-          const { data: vendorById } = await supabase
-            .from('vendors')
-            .select('*')
-            .eq('user_id', supaUser.id)
-            .maybeSingle();
-
-          if (vendorById) {
-            matchingVendor = rowToVendor(
-              vendorById as Record<string, unknown>,
-            );
-          } else if (email) {
-            const { data: vendorByEmail } = await supabase
-              .from('vendors')
-              .select('*')
-              .ilike('email', email)
-              .maybeSingle();
-            if (vendorByEmail)
-              matchingVendor = rowToVendor(
-                vendorByEmail as Record<string, unknown>,
-              );
-          }
-        } catch (err) {
-          console.warn(
-            '[AppContext] resolveUserFromSupabase — vendor query warning:',
-            err,
-          );
-          // Fallback to local cache
-          const localVendors = StorageManager.getVendors();
-          matchingVendor =
-            localVendors.find(
-              (v) =>
-                v.email?.toLowerCase() === email.toLowerCase(),
-            ) ?? null;
-        }
-      } else {
-        const localVendors = StorageManager.getVendors();
-        matchingVendor =
-          localVendors.find(
-            (v) => v.email?.toLowerCase() === email.toLowerCase(),
-          ) ?? null;
-      }
-
-      // 2. public.users lookup
-      let userRow: Record<string, unknown> | null = null;
-      if (supabase) {
-        try {
-          const { data: uRow } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', supaUser.id)
-            .maybeSingle();
-          if (uRow) userRow = uRow as Record<string, unknown>;
-        } catch (err) {
-          console.warn(
-            '[AppContext] resolveUserFromSupabase — users query warning:',
-            err,
-          );
-        }
-      }
-
-      // 3. Derive role
-      const role: User['role'] = isAdmin
-        ? 'admin'
-        : matchingVendor
-        ? 'vendor'
-        : ((userRow?.role as User['role']) ??
-            (supaUser.user_metadata?.role as User['role']) ??
-            'customer');
-
-      // 4. vendorId always comes from the DB record, never a generated string
-      const vendorId: string | undefined = matchingVendor
-        ? matchingVendor.id
-        : (userRow?.vendor_id as string | undefined);
-
-      // 5. Display name
-      const name = isAdmin
-        ? 'Platform Administrator'
-        : matchingVendor
-        ? matchingVendor.ownerName
-        : (userRow?.name as string | undefined) ??
-          (supaUser.user_metadata?.full_name as string | undefined) ??
-          email.split('@')[0] ??
-          'Ikorodu Shopper';
-
-      const phone =
-        matchingVendor?.phone ??
-        matchingVendor?.whatsapp ??
-        (userRow?.phone as string | undefined) ??
-        supaUser.phone ??
-        '';
-
-      const area =
-        matchingVendor?.area ??
-        (userRow?.area as string | undefined) ??
-        (supaUser.user_metadata?.area as string | undefined) ??
-        '';
-
-      return {
-        id: supaUser.id,
-        name,
-        email: email || undefined,
-        emailVerified: Boolean(supaUser.email_confirmed_at),
-        phone,
-        role,
-        vendorId,
-        area,
-        createdAt:
-          (userRow?.created_at as string | undefined) ??
-          matchingVendor?.createdAt ??
-          supaUser.created_at ??
-          new Date().toISOString(),
-      };
-    },
-    [],
-  );
-
-  // ─── Auth bootstrap ──────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    let authSubscription: { unsubscribe: () => void } | null = null;
-
-    const bootstrap = async () => {
-      // Start loading application data in parallel (doesn't block auth resolution)
-      setIsLoading(true);
-      void StorageManager.initFirestoreSync(() => refreshData());
-      refreshData();
-
-      if (!supabase) {
-        // No Supabase — local-only mode
-        setIsAuthLoading(false);
-        setIsAuthInitialized(true);
-        return;
-      }
-
-      // ── Step 1: Resolve existing session ─────────────────────────────────
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (session?.user) {
-          const resolved = await resolveUserFromSupabase(session.user);
-          setCurrentUser(resolved);
-        } else {
-          setCurrentUser(null);
-        }
-      } catch (err) {
-        console.error('[AppContext] getSession error:', err);
-        setCurrentUser(null);
-      } finally {
-        // CRITICAL: flip both flags in the same synchronous batch so
-        // components never see isAuthLoading=false with isAuthInitialized=false.
-        setIsAuthLoading(false);
-        setIsAuthInitialized(true);
-      }
-
-      // ── Step 2: Subscribe to future auth changes ──────────────────────────
-      const { data } = supabase.auth.onAuthStateChange(
-        async (event, session) => {
-          console.log('[AppContext] onAuthStateChange:', event);
-
-          if (event === 'PASSWORD_RECOVERY') {
-            setCurrentPageState('reset-password');
-            showToast(
-              'info',
-              'Reset Password',
-              'Verification confirmed. Set your new password below.',
-            );
-            return;
-          }
-
-          if (event === 'SIGNED_OUT') {
-            setCurrentUser(null);
-            return;
-          }
-
-          if (session?.user) {
-            try {
-              const resolved = await resolveUserFromSupabase(session.user);
-              setCurrentUser(resolved);
-            } catch (err) {
-              console.error(
-                '[AppContext] resolveUserFromSupabase error on auth change:',
-                err,
-              );
-              setCurrentUser(null);
-            }
-          } else {
-            setCurrentUser(null);
-          }
-        },
-      );
-
-      authSubscription = data.subscription;
-    };
-
-    void bootstrap();
-
-    return () => {
-      authSubscription?.unsubscribe();
-    };
-  }, [refreshData, resolveUserFromSupabase, showToast]);
-
-  // ─── Post-auth navigation ──────────────────────────────────────────────────
-  // Once auth resolves, redirect authenticated users who are on a neutral page
-  // (home) to their natural landing page (dashboard / admin).
-  useEffect(() => {
-    if (!isAuthInitialized || !currentUser) return;
-
-    const nonRedirectPages = ['store', 'admin', 'dashboard', 'profile', 'auth', 'reset-password', 'forgot-password'];
-    if (nonRedirectPages.includes(currentPage)) return;
-
-    if (currentUser.role === 'admin') {
-      setCurrentPageState('admin');
-      setIsAdminMode(true);
-      persistNav('admin', null);
-    } else if (currentUser.role === 'vendor') {
-      // Only redirect to dashboard if currently on home; don't interrupt store browsing
-      if (currentPage === 'home') {
-        setCurrentPageState('dashboard');
-        persistNav('dashboard', null);
-      }
-    }
-  }, [isAuthInitialized, currentUser, currentPage]);
-
-  // ─── URL / popstate sync ──────────────────────────────────────────────────
-
-  useEffect(() => {
-    const handleUrlChange = () => {
-      const nav = getInitialNav();
-      setCurrentPageState(nav.page);
-      setActiveVendorSlug(nav.slug);
-      if (nav.adminMode) setIsAdminMode(true);
-    };
-
-    window.addEventListener('hashchange', handleUrlChange);
-    window.addEventListener('popstate', handleUrlChange);
-
-    // Canonicalise initial URL
-    const nav = getInitialNav();
-    const target =
-      nav.page === 'admin'
-        ? '/admin'
-        : nav.page === 'store' && nav.slug
-        ? `/store/${encodeURIComponent(nav.slug)}`
-        : nav.page === 'dashboard'
-        ? '/dashboard'
-        : nav.page === 'auth'
-        ? '/auth'
-        : nav.page === 'profile'
-        ? '/profile'
-        : '/';
-
-    if (
-      window.location.pathname !== target ||
-      window.location.hash !== ''
-    ) {
-      window.history.replaceState({}, '', target);
-    }
-
-    return () => {
-      window.removeEventListener('hashchange', handleUrlChange);
-      window.removeEventListener('popstate', handleUrlChange);
-    };
-  }, []);
-
-  // ─── Derived state ─────────────────────────────────────────────────────────
-
-  const activeVendor: Vendor | null = currentUser
-    ? (vendors.find(
-        (v) =>
-          (currentUser.vendorId && v.id === currentUser.vendorId) ||
-          (currentUser.email &&
-            v.email?.toLowerCase() === currentUser.email.toLowerCase()),
-      ) ?? null)
-    : null;
-
-  // ─── Navigation ────────────────────────────────────────────────────────────
-
-  const setCurrentPage = useCallback(
-    (page: string) => {
-      const isEffectiveAdmin =
-        isAdminMode || currentUser?.role === 'admin';
-      const authGatedPages = ['dashboard', 'profile', 'user-profile'];
-
-      // Block navigation to auth-gated pages while auth is still resolving.
-      // The post-auth useEffect above will handle the redirect once resolved.
-      if (isAuthLoading && authGatedPages.includes(page)) {
-        return;
-      }
-
-      if (
-        authGatedPages.includes(page) &&
-        !currentUser &&
-        !isEffectiveAdmin
-      ) {
-        showToast(
-          'info',
-          'Authentication Required',
-          'Please sign in to access your dashboard or profile.',
-        );
-        setCurrentPageState('auth');
-        persistNav('auth', null);
-        return;
-      }
-
-      if (page === 'admin') setIsAdminMode(true);
-      setCurrentPageState(page);
-      persistNav(page, page === 'store' ? activeVendorSlug : null);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-    [isAuthLoading, isAdminMode, currentUser, activeVendorSlug, showToast],
-  );
-
-  const navigateToStore = useCallback(
-    (slug: string) => {
-      setActiveVendorSlug(slug);
-      setCurrentPageState('store');
-      persistNav('store', slug);
-      StorageManager.incrementVendorTap(
-        vendors.find(
-          (v) => v.slug.toLowerCase() === slug.toLowerCase(),
-        )?.id ?? '',
-        'profile',
-      );
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-    [vendors],
-  );
-
-  // ─── Data mutations ─────────────────────────────────────────────────────────
+  };
 
   const updateAdminSettings = (settings: AdminSettings) => {
     StorageManager.saveSettings(settings);
     setAdminSettings(settings);
-    showToast(
-      'success',
-      'Settings Saved',
-      'Bank account and WhatsApp support settings updated.',
-    );
+    showToast('success', 'Settings Saved', 'Bank account and WhatsApp support settings updated.');
   };
-
-  const toggleFavorite = (vendorId: string) => {
-    if (!currentUser) {
-      showToast(
-        'info',
-        'Sign in Required',
-        'Please sign in to save favourite businesses.',
-      );
-      setCurrentPage('auth');
-      return;
-    }
-    const updated = StorageManager.toggleFavorite(vendorId);
-    setFavorites(updated);
-    showToast(
-      'success',
-      'Saved!',
-      updated.includes(vendorId)
-        ? 'Added to your favourites.'
-        : 'Removed from favourites.',
-    );
-  };
-
-  // ─── Promotions ─────────────────────────────────────────────────────────────
 
   const createPromotionRequest = async (promo: Promotion) => {
     StorageManager.createPromotionRequest(promo);
@@ -784,141 +314,394 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const activatePromotion = async (promo: Promotion) => {
     StorageManager.activatePromotion(promo);
     refreshData();
-    showToast(
-      'success',
-      'Promotion Active!',
-      'Your promotion has been verified and activated.',
-    );
+    showToast('success', 'Promotion Active!', 'Your promotion has been verified and activated.');
   };
 
-  const updatePromotionStatus = async (
-    id: string,
-    newStatus: PromotionStatus,
-    extendDays = 0,
-  ) => {
+  const updatePromotionStatus = async (id: string, newStatus: PromotionStatus, extendDays: number = 0) => {
     StorageManager.updatePromotionStatus(id, newStatus, extendDays);
     refreshData();
-    const label =
-      newStatus === 'pending_verification'
-        ? 'Pending Verification'
-        : newStatus;
-    showToast('info', 'Promotion Updated', `Status updated to ${label}.`);
+    const readableStatus = newStatus === 'pending_verification' ? 'Pending Verification' : newStatus;
+    showToast('info', 'Promotion Updated', `Promotion status updated to ${readableStatus}.`);
   };
 
-  // ─── Admin vendor actions ───────────────────────────────────────────────────
+  const resolveUserFromSupabase = async (supaUser: any): Promise<User> => {
+    const email = supaUser.email || '';
+    const isAdmin = isAdminEmail(email);
+
+    // Direct DB lookup for vendor record matching email
+    let matchingVendor: Vendor | null = null;
+    if (supabase) {
+      try {
+        const { data: supaVendor } = await supabase
+          .from('vendors')
+          .select('*')
+          .ilike('email', email)
+          .maybeSingle();
+        if (supaVendor) {
+          matchingVendor = rowToVendor(supaVendor);
+        }
+      } catch (e) {
+        console.warn('Supabase vendor resolution query warning:', e);
+      }
+    }
+
+    if (!matchingVendor) {
+      const localVendors = StorageManager.getVendors();
+      matchingVendor = localVendors.find((v) => v.email?.toLowerCase() === email.toLowerCase()) || null;
+    }
+
+    // Direct DB lookup for users table record
+    let supaUserRow: any = null;
+    if (supabase) {
+      try {
+        const { data: uRow } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', supaUser.id)
+          .maybeSingle();
+        if (uRow) supaUserRow = uRow;
+      } catch (e) {
+        console.warn('Supabase user row resolution query warning:', e);
+      }
+    }
+
+    const role: 'admin' | 'vendor' | 'customer' = isAdmin
+      ? 'admin'
+      : matchingVendor
+      ? 'vendor'
+      : (supaUserRow?.role || supaUser.user_metadata?.role || 'customer');
+
+    const vendorId = matchingVendor ? matchingVendor.id : (supaUserRow?.vendor_id || undefined);
+
+    const name = isAdmin
+      ? 'Platform Administrator'
+      : matchingVendor
+      ? matchingVendor.ownerName
+      : supaUserRow?.name || supaUser.user_metadata?.full_name || email.split('@')[0] || 'Ikorodu Shopper';
+
+    const phone = matchingVendor?.phone || matchingVendor?.whatsapp || supaUserRow?.phone || supaUser.phone || '';
+    const area = matchingVendor?.area || supaUserRow?.area || supaUser.user_metadata?.area || '';
+
+    return {
+      id: supaUser.id,
+      name,
+      email: email || undefined,
+      emailVerified: Boolean(supaUser.email_confirmed_at),
+      phone,
+      role,
+      vendorId,
+      area,
+      createdAt: supaUserRow?.created_at || matchingVendor?.createdAt || supaUser.created_at || new Date().toISOString(),
+    };
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    refreshData();
+
+    let authComplete = false;
+    let syncComplete = false;
+
+    const checkHydrationComplete = () => {
+      if (authComplete && syncComplete && isMounted) {
+        setIsLoading(false);
+      }
+    };
+
+    // Safety fallback timer so loading never hangs if offline or delayed
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    }, 2500);
+
+    // Initial Database Sync (Supabase / Storage)
+    StorageManager.initFirestoreSync(() => {
+      if (isMounted) {
+        refreshData();
+        syncComplete = true;
+        checkHydrationComplete();
+      }
+    }).then(() => {
+      if (isMounted) {
+        refreshData();
+        syncComplete = true;
+        checkHydrationComplete();
+      }
+    }).catch((e) => {
+      console.warn('[Hydration Sync Warning]:', e);
+      if (isMounted) {
+        syncComplete = true;
+        checkHydrationComplete();
+      }
+    });
+
+    // Initial Supabase Auth session restoration
+    let authSubscription: { unsubscribe: () => void } | null = null;
+    if (supabase) {
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session?.user && isMounted) {
+          const syncedUser = await resolveUserFromSupabase(session.user);
+          if (isMounted) setCurrentUser(syncedUser);
+        } else if (isMounted) {
+          setCurrentUser(null);
+        }
+        authComplete = true;
+        checkHydrationComplete();
+      }).catch((e) => {
+        console.warn('[Hydration Auth Error]:', e);
+        if (isMounted) {
+          authComplete = true;
+          checkHydrationComplete();
+        }
+      });
+
+      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (!isMounted) return;
+        if (event === 'PASSWORD_RECOVERY') {
+          setCurrentPageState('reset-password');
+          showToast('info', 'Reset Password', 'Verification code confirmed. Please set your new password below.');
+          return;
+        }
+
+        if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          return;
+        }
+
+        if (session?.user) {
+          const syncedUser = await resolveUserFromSupabase(session.user);
+          if (isMounted) setCurrentUser(syncedUser);
+        } else {
+          if (isMounted) setCurrentUser(null);
+        }
+      });
+      authSubscription = data.subscription;
+    } else {
+      authComplete = true;
+      checkHydrationComplete();
+    }
+
+    return () => {
+      isMounted = false;
+      clearTimeout(fallbackTimer);
+      if (authSubscription) authSubscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const nav = getInitialPageAndSlug();
+      setCurrentPageState(nav.page);
+      setActiveVendorSlug(nav.slug);
+      if (nav.adminMode) setIsAdminMode(true);
+    };
+
+    window.addEventListener('hashchange', handleUrlChange);
+    window.addEventListener('popstate', handleUrlChange);
+
+    // Initial sync of route & storage
+    if (typeof window !== 'undefined') {
+      const nav = getInitialPageAndSlug();
+      let targetPath = '/';
+      if (nav.page === 'admin') targetPath = '/admin';
+      else if (nav.page === 'store' && nav.slug) targetPath = `/store/${encodeURIComponent(nav.slug)}`;
+      else if (nav.page === 'dashboard') targetPath = '/dashboard';
+      else if (nav.page === 'auth') targetPath = '/auth';
+      else if (nav.page === 'profile') targetPath = '/profile';
+
+      if (window.location.pathname !== targetPath || window.location.hash !== '') {
+        window.history.replaceState({}, '', targetPath);
+      }
+      try {
+        localStorage.setItem('ikorodusquare_last_page', nav.page);
+        if (nav.slug) localStorage.setItem('ikorodusquare_last_slug', nav.slug);
+      } catch (e) {
+        console.error('Failed to sync state to localStorage', e);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleUrlChange);
+    };
+  }, []);
+
+  // Derived active vendor if logged in vendor or viewing store
+  const activeVendor = currentUser
+    ? vendors.find(
+        (v) =>
+          (currentUser.vendorId && v.id === currentUser.vendorId) ||
+          (currentUser.email && v.email && v.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+          (v.userId && v.userId === currentUser.id) ||
+          (v.user_id && v.user_id === currentUser.id)
+      ) || null
+    : null;
+
+  const navigateToStore = (slug: string) => {
+    setActiveVendorSlug(slug);
+    setCurrentPageState('store');
+    updateUrlAndStorage('store', slug);
+    StorageManager.incrementVendorTap(
+      vendors.find((v) => v.slug.toLowerCase() === slug.toLowerCase())?.id || '',
+      'profile'
+    );
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const showToast = (type: 'success' | 'error' | 'info', title: string, message: string) => {
+    const id = Date.now().toString();
+    setToasts((prev) => [...prev, { id, type, title, message }]);
+    setTimeout(() => {
+      removeToast(id);
+    }, 5000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const toggleFavorite = (vendorId: string) => {
+    if (!currentUser) {
+      showToast('info', 'Sign in Required', 'Please sign in or register to save favourite businesses.');
+      setCurrentPage('auth');
+      return;
+    }
+    const updated = StorageManager.toggleFavorite(vendorId);
+    setFavorites(updated);
+    showToast('success', 'Saved!', updated.includes(vendorId) ? 'Added to your favourites.' : 'Removed from favourites.');
+  };
 
   const approveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    const updated: Vendor = {
+
+    const updatedVendor: Vendor = {
       ...v,
       status: 'approved',
       isLive: true,
-      approvedAt: v.approvedAt ?? new Date().toISOString(),
+      approvedAt: v.approvedAt || new Date().toISOString(),
     };
-    StorageManager.updateVendor(updated);
+
+    StorageManager.updateVendor(updatedVendor);
     refreshData();
-    const msg = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED. View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
-    await ApiService.sendWhatsAppNotification(v.whatsapp, msg);
-    showToast('success', 'Vendor Approved', `"${v.businessName}" is now live.`);
+
+    // Send WhatsApp notification via Sendchamp API bridge
+    const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live to thousands of customers across Ikorodu! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
+    await ApiService.sendWhatsAppNotification(v.whatsapp, message);
+
+    showToast('success', 'Vendor Approved', `"${v.businessName}" is now live and public.`);
   };
 
   const unapproveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    StorageManager.updateVendor({ ...v, status: 'pending', isLive: false });
+
+    const updatedVendor: Vendor = {
+      ...v,
+      status: 'pending',
+      isLive: false,
+    };
+
+    StorageManager.updateVendor(updatedVendor);
     refreshData();
-    showToast(
-      'info',
-      'Vendor Unapproved',
-      `"${v.businessName}" status set to pending.`,
-    );
+
+    showToast('info', 'Vendor Unapproved', `"${v.businessName}" status set to pending.`);
   };
 
   const toggleVendorApproval = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    if (v.isLive || v.status === 'approved') await unapproveVendor(vendorId);
-    else await approveVendor(vendorId);
+    if (v.isLive || v.status === 'approved') {
+      await unapproveVendor(vendorId);
+    } else {
+      await approveVendor(vendorId);
+    }
   };
 
   const toggleVendorVerification = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    const current = Boolean(v.ninVerified ?? v.nin_verified);
-    const next = !current;
-    StorageManager.updateVendor({
+
+    const currentStatus = Boolean(v.ninVerified || v.nin_verified);
+    const newStatus = !currentStatus;
+
+    const updatedVendor: Vendor = {
       ...v,
-      ninVerified: next,
-      nin_verified: next,
-      ninData: next
-        ? (v.ninData ?? {
+      ninVerified: newStatus,
+      nin_verified: newStatus,
+      ninData: newStatus
+        ? (v.ninData || {
             nin: '11111111111',
             fullName: v.ownerName,
             dob: '1990-01-01',
             verifiedAt: new Date().toISOString(),
           })
         : v.ninData,
-    });
+    };
+
+    StorageManager.updateVendor(updatedVendor);
     refreshData();
+
     showToast(
-      next ? 'success' : 'info',
-      next ? 'Vendor Verified' : 'Verification Removed',
-      `"${v.businessName}" ${next ? 'is now verified' : 'verification removed'}.`,
+      newStatus ? 'success' : 'info',
+      newStatus ? 'Vendor Verified' : 'Verification Removed',
+      `"${v.businessName}" ${newStatus ? 'is now verified' : 'verification removed'}.`
     );
   };
 
   const toggleVendorFeatured = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    const current = Boolean(
-      v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage,
-    );
-    const next = !current;
-    StorageManager.updateVendor({
+
+    const currentFeatured = Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
+    const newFeatured = !currentFeatured;
+
+    const updatedVendor: Vendor = {
       ...v,
-      isFeatured: next,
-      is_featured: next,
-      featuredOnHomepage: next,
-    });
+      isFeatured: newFeatured,
+      is_featured: newFeatured,
+      featuredOnHomepage: newFeatured,
+    };
+
+    StorageManager.updateVendor(updatedVendor);
     refreshData();
+
     showToast(
-      next ? 'success' : 'info',
-      next ? 'Vendor Featured' : 'Removed from Featured',
-      `"${v.businessName}" ${next ? 'added to' : 'removed from'} homepage featured.`,
+      newFeatured ? 'success' : 'info',
+      newFeatured ? 'Vendor Featured' : 'Removed from Featured',
+      `"${v.businessName}" ${newFeatured ? 'added to' : 'removed from'} homepage Featured Businesses.`
     );
   };
 
   const rejectVendor = async (vendorId: string, reason: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    StorageManager.updateVendor({
+
+    const updatedVendor: Vendor = {
       ...v,
       status: 'rejected',
       isLive: false,
-    });
+    };
+
+    StorageManager.updateVendor(updatedVendor);
     refreshData();
-    const msg = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}.`;
-    await ApiService.sendWhatsAppNotification(v.whatsapp, msg);
-    showToast(
-      'info',
-      'Vendor Rejected',
-      `Rejection notice sent via WhatsApp to ${v.businessName}.`,
-    );
+
+    // Send WhatsApp rejection notification
+    const message = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}. Please update your profile in your dashboard.`;
+    await ApiService.sendWhatsAppNotification(v.whatsapp, message);
+
+    showToast('info', 'Vendor Application Rejected', `Rejection notice sent via WhatsApp to ${v.businessName}.`);
   };
 
   const deleteVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     await StorageManager.deleteVendorAsync(vendorId);
     refreshData();
-    showToast(
-      'info',
-      'Vendor Removed',
-      `"${v?.businessName ?? 'Store'}" has been deleted.`,
-    );
+    showToast('info', 'Vendor Removed', `"${v?.businessName || 'Store'}" has been deleted from IkoroduSquare.`);
   };
-
-  // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <AppContext.Provider
@@ -941,8 +724,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         adminSettings,
         updateAdminSettings,
         isLoading,
-        isAuthLoading,
-        isAuthInitialized,
         searchType,
         setSearchType,
         searchQuery,
@@ -980,8 +761,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 };
 
-export const useApp = (): AppContextType => {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useApp must be used within an AppProvider');
-  return ctx;
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
 };
