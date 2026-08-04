@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { User, Vendor, Product, Review, Enquiry, BannerAd, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS } from '../types';
 import { StorageManager, rowToVendor } from '../data/mockStorage';
 import { ApiService } from '../services/api';
-import { supabase } from '../services/supabase';
+import { supabase, isSupabaseConfigured } from '../services/supabase';
 import { Language, TRANSLATIONS } from '../data/translations';
 import { isAdminEmail } from '../lib/admin';
 
@@ -14,16 +14,20 @@ interface Toast {
 }
 
 interface AppContextType {
+  // Navigation
   currentPage: string;
   setCurrentPage: (page: string) => void;
   activeVendorSlug: string | null;
   setActiveVendorSlug: (slug: string | null) => void;
   navigateToStore: (slug: string) => void;
 
+  // Authentication - Supabase is the ONLY source
   currentUser: User | null;
-  setCurrentUser: (user: User | null) => void;
+  isAuthLoading: boolean;
+  isAuthInitialized: boolean;
+
+  // Data
   activeVendor: Vendor | null;
-  
   vendors: Vendor[];
   products: Product[];
   reviews: Review[];
@@ -34,10 +38,10 @@ interface AppContextType {
   adminSettings: AdminSettings;
   updateAdminSettings: (settings: AdminSettings) => void;
 
-  // Loading state for Firestore & initial sync
+  // Loading state
   isLoading: boolean;
 
-  // Search & Filter State
+  // Search & Filter
   searchType: 'business' | 'product';
   setSearchType: (type: 'business' | 'product') => void;
   searchQuery: string;
@@ -68,15 +72,13 @@ interface AppContextType {
   rejectVendor: (vendorId: string, reason: string) => Promise<void>;
   deleteVendor: (vendorId: string) => Promise<void>;
 
-  // Store Setup Modal State
+  // UI State
   showSetupModal: boolean;
   setShowSetupModal: (show: boolean) => void;
-
-  // Admin Mode Toggle for quick testing
   isAdminMode: boolean;
   setIsAdminMode: (admin: boolean) => void;
 
-  // Language Translation State
+  // Language
   language: Language;
   setLanguage: (lang: Language) => void;
   t: (key: string, defaultText?: string) => string;
@@ -85,146 +87,20 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const getInitialPageAndSlug = () => {
-    if (typeof window === 'undefined') return { page: 'home', slug: null, adminMode: false };
-
-    // 1. Check Query Params (?store=slug or ?vendor=slug or ?shop=slug)
-    if (window.location.search) {
-      const searchParams = new URLSearchParams(window.location.search);
-      const storeQuery = searchParams.get('store') || searchParams.get('vendor') || searchParams.get('shop');
-      if (storeQuery) {
-        return { page: 'store', slug: decodeURIComponent(storeQuery.trim()), adminMode: false };
-      }
-      const pageQuery = searchParams.get('page');
-      if (pageQuery) {
-        const p = pageQuery.toLowerCase();
-        if (p === 'admin' || p.startsWith('admin/')) return { page: 'admin', slug: null, adminMode: true };
-        if (p === 'dashboard' || p === 'vendor-dashboard') return { page: 'dashboard', slug: null, adminMode: false };
-        if (p === 'profile' || p === 'user-profile') return { page: 'profile', slug: null, adminMode: false };
-        if (p === 'auth' || p === 'login') return { page: 'auth', slug: null, adminMode: false };
-        if (p === 'forgot-password' || p === 'forgot') return { page: 'forgot-password', slug: null, adminMode: false };
-        if (p === 'reset-password' || p === 'reset') return { page: 'reset-password', slug: null, adminMode: false };
-      }
-    }
-
-    // 2. Check Hash (#/admin, #/store/slug, #/vendor/slug, #/dashboard, etc.)
-    if (window.location.hash && window.location.hash.startsWith('#')) {
-      const rawHash = window.location.hash.replace(/^#\/?/, '').trim();
-      const hashLower = rawHash.toLowerCase();
-      if (hashLower === 'admin' || hashLower.startsWith('admin/')) {
-        return { page: 'admin', slug: null, adminMode: true };
-      }
-      if (hashLower.startsWith('store/')) {
-        const slug = decodeURIComponent(rawHash.substring(6).trim());
-        return { page: 'store', slug: slug || null, adminMode: false };
-      }
-      if (hashLower.startsWith('vendor/')) {
-        const slug = decodeURIComponent(rawHash.substring(7).trim());
-        return { page: 'store', slug: slug || null, adminMode: false };
-      }
-      if (hashLower.startsWith('shop/')) {
-        const slug = decodeURIComponent(rawHash.substring(5).trim());
-        return { page: 'store', slug: slug || null, adminMode: false };
-      }
-      if (hashLower === 'auth' || hashLower === 'login') {
-        return { page: 'auth', slug: null, adminMode: false };
-      }
-      if (hashLower === 'forgot-password' || hashLower === 'forgot') {
-        return { page: 'forgot-password', slug: null, adminMode: false };
-      }
-      if (hashLower === 'reset-password' || hashLower === 'reset' || hashLower.includes('access_token')) {
-        return { page: 'reset-password', slug: null, adminMode: false };
-      }
-      if (hashLower === 'dashboard' || hashLower === 'vendor-dashboard') {
-        return { page: 'dashboard', slug: null, adminMode: false };
-      }
-      if (hashLower === 'profile' || hashLower === 'user-profile') {
-        return { page: 'profile', slug: null, adminMode: false };
-      }
-      if (hashLower === 'home' || hashLower === '') {
-        return { page: 'home', slug: null, adminMode: false };
-      }
-    }
-
-    // 3. Check Pathname (/admin, /admin/..., /store/slug, /vendor/slug, etc.)
-    const path = window.location.pathname;
-    const pathLower = path.toLowerCase();
-    if (pathLower === '/admin' || pathLower === '/admin/' || pathLower.startsWith('/admin/')) {
-      return { page: 'admin', slug: null, adminMode: true };
-    }
-    if (pathLower.startsWith('/store/')) {
-      const slug = decodeURIComponent(path.substring(7).trim().replace(/\/$/, ''));
-      return { page: 'store', slug: slug || null, adminMode: false };
-    }
-    if (pathLower.startsWith('/vendor/')) {
-      const slug = decodeURIComponent(path.substring(8).trim().replace(/\/$/, ''));
-      return { page: 'store', slug: slug || null, adminMode: false };
-    }
-    if (pathLower.startsWith('/shop/')) {
-      const slug = decodeURIComponent(path.substring(6).trim().replace(/\/$/, ''));
-      return { page: 'store', slug: slug || null, adminMode: false };
-    }
-    if (pathLower === '/auth' || pathLower === '/login') {
-      return { page: 'auth', slug: null, adminMode: false };
-    }
-    if (pathLower === '/dashboard' || pathLower === '/vendor-dashboard') {
-      return { page: 'dashboard', slug: null, adminMode: false };
-    }
-    if (pathLower === '/profile' || pathLower === '/user-profile') {
-      return { page: 'profile', slug: null, adminMode: false };
-    }
-
-    // 4. Fallback to localStorage saved page state
-    try {
-      const savedPage = localStorage.getItem('ikorodusquare_last_page');
-      const savedSlug = localStorage.getItem('ikorodusquare_last_slug');
-      if (savedPage) {
-        if (savedPage === 'admin') return { page: 'admin', slug: null, adminMode: true };
-        if (savedPage === 'store' && savedSlug) return { page: 'store', slug: savedSlug, adminMode: false };
-        if (['auth', 'dashboard', 'profile', 'home'].includes(savedPage)) {
-          return { page: savedPage, slug: null, adminMode: false };
-        }
-      }
-    } catch (e) {
-      console.error('Failed to read saved page from localStorage', e);
-    }
-
-    return { page: 'home', slug: null, adminMode: false };
-  };
-
-  const updateUrlAndStorage = (page: string, slug: string | null = null) => {
-    if (typeof window === 'undefined') return;
-
-    try {
-      localStorage.setItem('ikorodusquare_last_page', page);
-      if (slug) {
-        localStorage.setItem('ikorodusquare_last_slug', slug);
-      } else {
-        localStorage.removeItem('ikorodusquare_last_slug');
-      }
-    } catch (e) {
-      console.error('Failed to save route state to localStorage', e);
-    }
-
-    let targetPath = '/';
-    if (page === 'admin') targetPath = '/admin';
-    else if (page === 'store' && slug) targetPath = `/store/${encodeURIComponent(slug)}`;
-    else if (page === 'dashboard') targetPath = '/dashboard';
-    else if (page === 'auth') targetPath = '/auth';
-    else if (page === 'profile') targetPath = '/profile';
-    else targetPath = '/';
-
-    if (window.location.pathname !== targetPath || window.location.hash !== '') {
-      window.history.pushState({}, '', targetPath);
-    }
-  };
-
-  const initialNav = getInitialPageAndSlug();
-  const [currentPage, setCurrentPageState] = useState<string>(initialNav.page);
-  const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(initialNav.slug);
-
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // ============================================================
+  // 1. AUTH STATE - Supabase is the ONLY source
+  // ============================================================
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [isAuthInitialized, setIsAuthInitialized] = useState<boolean>(false);
+  const authInitializedRef = useRef(false);
+
+  // ============================================================
+  // 2. APPLICATION STATE
+  // ============================================================
+  const [currentPage, setCurrentPageState] = useState<string>('home');
+  const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -235,15 +111,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => StorageManager.getSettings());
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Search & Filter State
+  // Search & Filter
   const [searchType, setSearchType] = useState<'business' | 'product'>('business');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedArea, setSelectedArea] = useState<string>('All');
 
-  // Admin & Modal & Language
+  // UI
   const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(initialNav.adminMode);
+  const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+
+  // Language
   const [language, setLanguageState] = useState<Language>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('ikorodusquare_lang');
@@ -252,43 +130,197 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'en';
   });
 
-  const setLanguage = (lang: Language) => {
-    setLanguageState(lang);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('ikorodusquare_lang', lang);
-    }
-  };
+  // ============================================================
+  // 3. NAVIGATION HELPERS
+  // ============================================================
+  const updateUrl = useCallback((page: string, slug: string | null = null) => {
+    if (typeof window === 'undefined') return;
 
-  const t = (key: string, defaultText?: string): string => {
-    const langObj = TRANSLATIONS[language];
-    if (langObj && langObj[key]) {
-      return langObj[key];
-    }
-    return defaultText || TRANSLATIONS['en'][key] || key;
-  };
+    let targetPath = '/';
+    if (page === 'admin') targetPath = '/admin';
+    else if (page === 'store' && slug) targetPath = `/store/${encodeURIComponent(slug)}`;
+    else if (page === 'dashboard') targetPath = '/dashboard';
+    else if (page === 'auth') targetPath = '/auth';
+    else if (page === 'profile') targetPath = '/profile';
 
-  const setCurrentPage = (page: string) => {
-    // Route Protection for authenticated pages
-    const isEffectiveAdmin = isAdminMode || currentUser?.role === 'admin';
-    const protectedPages = ['dashboard', 'admin', 'profile', 'user-profile'];
-    if (protectedPages.includes(page) && !currentUser && !isEffectiveAdmin && page !== 'admin') {
-      showToast('info', 'Authentication Required', 'Please sign in to access your dashboard or profile.');
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+  }, []);
+
+  const setCurrentPage = useCallback((page: string) => {
+    // Protected routes check
+    const protectedPages = ['dashboard', 'admin', 'profile'];
+    if (protectedPages.includes(page) && !currentUser && page !== 'admin') {
+      showToast('info', 'Authentication Required', 'Please sign in to access your dashboard.');
       setCurrentPageState('auth');
-      updateUrlAndStorage('auth', null);
+      updateUrl('auth', null);
       return;
     }
 
     setCurrentPageState(page);
-    if (page === 'admin') {
-      setIsAdminMode(true);
-    }
-    updateUrlAndStorage(page, page === 'store' ? activeVendorSlug : null);
+    if (page === 'admin') setIsAdminMode(true);
+    updateUrl(page, page === 'store' ? activeVendorSlug : null);
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  };
+  }, [currentUser, activeVendorSlug, updateUrl]);
 
-  const refreshData = () => {
+  const navigateToStore = useCallback((slug: string) => {
+    setActiveVendorSlug(slug);
+    setCurrentPageState('store');
+    updateUrl('store', slug);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [updateUrl]);
+
+  // ============================================================
+  // 4. USER RESOLVER - Single source of truth
+  // ============================================================
+  const resolveUser = useCallback(async (supaUser: any): Promise<User | null> => {
+    if (!supaUser) return null;
+
+    const email = supaUser.email || '';
+    const isAdmin = isAdminEmail(email);
+
+    try {
+      // Step 1: Get user from public.users table
+      let userRow: any = null;
+      if (supabase && isSupabaseConfigured()) {
+        try {
+          const { data: uRow } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', supaUser.id)
+            .maybeSingle();
+          if (uRow) userRow = uRow;
+        } catch (e) {
+          console.warn('[AppContext] User row fetch warning:', e);
+        }
+      }
+
+      // Step 2: Get vendor record if exists
+      let vendorRow: any = null;
+      if (supabase && isSupabaseConfigured()) {
+        try {
+          // Try by user's vendor_id first
+          if (userRow?.vendor_id) {
+            const { data: vRow } = await supabase
+              .from('vendors')
+              .select('*')
+              .eq('id', userRow.vendor_id)
+              .maybeSingle();
+            if (vRow) vendorRow = vRow;
+          }
+
+          // If no vendor found, try by email
+          if (!vendorRow && email) {
+            const { data: vRow } = await supabase
+              .from('vendors')
+              .select('*')
+              .ilike('email', email)
+              .maybeSingle();
+            if (vRow) vendorRow = vRow;
+          }
+        } catch (e) {
+          console.warn('[AppContext] Vendor fetch warning:', e);
+        }
+      }
+
+      // Step 3: Fallback to local storage for vendor data
+      let fallbackVendor: Vendor | null = null;
+      if (!vendorRow) {
+        const localVendors = StorageManager.getVendors();
+        fallbackVendor = localVendors.find(v => v.email?.toLowerCase() === email.toLowerCase()) || null;
+      }
+
+      // Step 4: Build user object
+      const vendor = vendorRow ? rowToVendor(vendorRow) : fallbackVendor;
+
+      const role: 'admin' | 'vendor' | 'customer' = isAdmin
+        ? 'admin'
+        : vendor
+        ? 'vendor'
+        : (userRow?.role || 'customer');
+
+      const name = isAdmin
+        ? 'Platform Administrator'
+        : vendor
+        ? vendor.ownerName
+        : userRow?.name || supaUser.user_metadata?.full_name || email.split('@')[0] || 'Ikorodu Shopper';
+
+      const phone = vendor?.phone || vendor?.whatsapp || userRow?.phone || supaUser.phone || '';
+      const area = vendor?.area || userRow?.area || supaUser.user_metadata?.area || '';
+
+      return {
+        id: supaUser.id,
+        name,
+        email: email || undefined,
+        emailVerified: Boolean(supaUser.email_confirmed_at),
+        phone,
+        role,
+        vendorId: vendor?.id || userRow?.vendor_id || undefined,
+        area,
+        createdAt: userRow?.created_at || vendor?.createdAt || supaUser.created_at || new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error('[AppContext] User resolution error:', error);
+      // Fallback: create minimal user
+      return {
+        id: supaUser.id,
+        name: supaUser.email?.split('@')[0] || 'User',
+        email: supaUser.email,
+        emailVerified: Boolean(supaUser.email_confirmed_at),
+        phone: '',
+        role: isAdmin ? 'admin' : 'customer',
+        createdAt: new Date().toISOString(),
+      };
+    }
+  }, []);
+
+  // ============================================================
+  // 5. AUTH INITIALIZATION - Single source
+  // ============================================================
+  const initializeAuth = useCallback(async () => {
+    if (!isSupabaseConfigured() || !supabase) {
+      console.log('[AppContext] Supabase not configured, using localStorage fallback');
+      const localUser = StorageManager.getCurrentUser();
+      if (localUser) {
+        setCurrentUser(localUser);
+      }
+      setIsAuthLoading(false);
+      setIsAuthInitialized(true);
+      authInitializedRef.current = true;
+      return;
+    }
+
+    try {
+      // Get session from Supabase
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        const resolvedUser = await resolveUser(session.user);
+        if (resolvedUser) {
+          setCurrentUser(resolvedUser);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+    } catch (error) {
+      console.error('[AppContext] Auth initialization error:', error);
+      setCurrentUser(null);
+    } finally {
+      setIsAuthLoading(false);
+      setIsAuthInitialized(true);
+      authInitializedRef.current = true;
+    }
+  }, [resolveUser]);
+
+  // ============================================================
+  // 6. DATA INITIALIZATION
+  // ============================================================
+  const refreshData = useCallback(() => {
     StorageManager.checkAndSyncPromotionExpiries();
     setPromotions(StorageManager.getPromotions());
     setAdminSettings(StorageManager.getSettings());
@@ -298,195 +330,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEnquiries(StorageManager.getEnquiries());
     setBanners(StorageManager.getBanners());
     setFavorites(StorageManager.getFavorites());
-  };
+  }, []);
 
-  const updateAdminSettings = (settings: AdminSettings) => {
-    StorageManager.saveSettings(settings);
-    setAdminSettings(settings);
-    showToast('success', 'Settings Saved', 'Bank account and WhatsApp support settings updated.');
-  };
-
-  const createPromotionRequest = async (promo: Promotion) => {
-    StorageManager.createPromotionRequest(promo);
-    refreshData();
-  };
-
-  const activatePromotion = async (promo: Promotion) => {
-    StorageManager.activatePromotion(promo);
-    refreshData();
-    showToast('success', 'Promotion Active!', 'Your promotion has been verified and activated.');
-  };
-
-  const updatePromotionStatus = async (id: string, newStatus: PromotionStatus, extendDays: number = 0) => {
-    StorageManager.updatePromotionStatus(id, newStatus, extendDays);
-    refreshData();
-    const readableStatus = newStatus === 'pending_verification' ? 'Pending Verification' : newStatus;
-    showToast('info', 'Promotion Updated', `Promotion status updated to ${readableStatus}.`);
-  };
-
-  const resolveUserFromSupabase = async (supaUser: any): Promise<User> => {
-    const email = supaUser.email || '';
-    const isAdmin = isAdminEmail(email);
-
-    // Direct DB lookup for vendor record matching email
-    let matchingVendor: Vendor | null = null;
-    if (supabase) {
-      try {
-        const { data: supaVendor } = await supabase
-          .from('vendors')
-          .select('*')
-          .ilike('email', email)
-          .maybeSingle();
-        if (supaVendor) {
-          matchingVendor = rowToVendor(supaVendor);
-        }
-      } catch (e) {
-        console.warn('Supabase vendor resolution query warning:', e);
-      }
-    }
-
-    if (!matchingVendor) {
-      const localVendors = StorageManager.getVendors();
-      matchingVendor = localVendors.find((v) => v.email?.toLowerCase() === email.toLowerCase()) || null;
-    }
-
-    // Direct DB lookup for users table record
-    let supaUserRow: any = null;
-    if (supabase) {
-      try {
-        const { data: uRow } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', supaUser.id)
-          .maybeSingle();
-        if (uRow) supaUserRow = uRow;
-      } catch (e) {
-        console.warn('Supabase user row resolution query warning:', e);
-      }
-    }
-
-    const role: 'admin' | 'vendor' | 'customer' = isAdmin
-      ? 'admin'
-      : matchingVendor
-      ? 'vendor'
-      : (supaUserRow?.role || supaUser.user_metadata?.role || 'customer');
-
-    const vendorId = matchingVendor ? matchingVendor.id : (supaUserRow?.vendor_id || undefined);
-
-    const name = isAdmin
-      ? 'Platform Administrator'
-      : matchingVendor
-      ? matchingVendor.ownerName
-      : supaUserRow?.name || supaUser.user_metadata?.full_name || email.split('@')[0] || 'Ikorodu Shopper';
-
-    const phone = matchingVendor?.phone || matchingVendor?.whatsapp || supaUserRow?.phone || supaUser.phone || '';
-    const area = matchingVendor?.area || supaUserRow?.area || supaUser.user_metadata?.area || '';
-
-    return {
-      id: supaUser.id,
-      name,
-      email: email || undefined,
-      emailVerified: Boolean(supaUser.email_confirmed_at),
-      phone,
-      role,
-      vendorId,
-      area,
-      createdAt: supaUserRow?.created_at || matchingVendor?.createdAt || supaUser.created_at || new Date().toISOString(),
-    };
-  };
-
+  // ============================================================
+  // 7. EFFECTS
+  // ============================================================
+  
+  // Effect 1: Initialize everything on mount
   useEffect(() => {
+    // Start data loading
     refreshData();
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 450);
+    
+    // Start auth initialization
+    initializeAuth();
 
+    // Start Supabase realtime sync
     StorageManager.initFirestoreSync(() => {
       refreshData();
-      setIsLoading(false);
     });
 
-    let authSubscription: { unsubscribe: () => void } | null = null;
-    if (supabase) {
-      // 1. Initial Session Restoration
-      supabase.auth.getSession().then(async ({ data: { session } }) => {
-        if (session?.user) {
-          const syncedUser = await resolveUserFromSupabase(session.user);
-          setCurrentUser(syncedUser);
-        } else {
-          setCurrentUser(null);
-        }
-        setIsLoading(false);
-      });
+    // Set loading to false after data loads
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 500);
 
-      // 2. Auth State Listener
-      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'PASSWORD_RECOVERY') {
-          setCurrentPageState('reset-password');
-          showToast('info', 'Reset Password', 'Verification code confirmed. Please set your new password below.');
-          return;
-        }
+    return () => clearTimeout(timer);
+  }, [initializeAuth, refreshData]);
 
-        if (event === 'SIGNED_OUT') {
-          setCurrentUser(null);
-          return;
-        }
-
-        if (session?.user) {
-          const syncedUser = await resolveUserFromSupabase(session.user);
-          setCurrentUser(syncedUser);
-        } else {
-          setCurrentUser(null);
-        }
-      });
-      authSubscription = data.subscription;
-    }
-
-    return () => {
-      clearTimeout(timer);
-      if (authSubscription) authSubscription.unsubscribe();
-    };
-  }, []);
-
+  // Effect 2: Supabase Auth Listener
   useEffect(() => {
-    const handleUrlChange = () => {
-      const nav = getInitialPageAndSlug();
-      setCurrentPageState(nav.page);
-      setActiveVendorSlug(nav.slug);
-      if (nav.adminMode) setIsAdminMode(true);
-    };
-
-    window.addEventListener('hashchange', handleUrlChange);
-    window.addEventListener('popstate', handleUrlChange);
-
-    // Initial sync of route & storage
-    if (typeof window !== 'undefined') {
-      const nav = getInitialPageAndSlug();
-      let targetPath = '/';
-      if (nav.page === 'admin') targetPath = '/admin';
-      else if (nav.page === 'store' && nav.slug) targetPath = `/store/${encodeURIComponent(nav.slug)}`;
-      else if (nav.page === 'dashboard') targetPath = '/dashboard';
-      else if (nav.page === 'auth') targetPath = '/auth';
-      else if (nav.page === 'profile') targetPath = '/profile';
-
-      if (window.location.pathname !== targetPath || window.location.hash !== '') {
-        window.history.replaceState({}, '', targetPath);
-      }
-      try {
-        localStorage.setItem('ikorodusquare_last_page', nav.page);
-        if (nav.slug) localStorage.setItem('ikorodusquare_last_slug', nav.slug);
-      } catch (e) {
-        console.error('Failed to sync state to localStorage', e);
-      }
+    if (!isSupabaseConfigured() || !supabase) {
+      return;
     }
 
-    return () => {
-      window.removeEventListener('hashchange', handleUrlChange);
-      window.removeEventListener('popstate', handleUrlChange);
-    };
-  }, []);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[AppContext] Auth state change:', event);
 
-  // Derived active vendor if logged in vendor or viewing store
+      if (event === 'PASSWORD_RECOVERY') {
+        setCurrentPageState('reset-password');
+        showToast('info', 'Reset Password', 'Verification confirmed. Please set your new password.');
+        return;
+      }
+
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        // Clear any localStorage auth remnants
+        try {
+          localStorage.removeItem('ikorodusquare_current_user_v1');
+        } catch (e) {
+          // ignore
+        }
+        return;
+      }
+
+      // For any sign-in event (SIGNED_IN, TOKEN_REFRESHED, USER_UPDATED)
+      if (session?.user) {
+        const resolvedUser = await resolveUser(session.user);
+        if (resolvedUser) {
+          setCurrentUser(resolvedUser);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [resolveUser]);
+
+  // Effect 3: Sync currentUser to localStorage for offline fallback only
+  useEffect(() => {
+    if (currentUser) {
+      try {
+        localStorage.setItem('ikorodusquare_current_user_v1', JSON.stringify(currentUser));
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [currentUser]);
+
+  // ============================================================
+  // 8. DERIVED STATE
+  // ============================================================
   const activeVendor = currentUser
     ? vendors.find(
         (v) =>
@@ -495,224 +421,353 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ) || null
     : null;
 
-  const navigateToStore = (slug: string) => {
-    setActiveVendorSlug(slug);
-    setCurrentPageState('store');
-    updateUrlAndStorage('store', slug);
-    StorageManager.incrementVendorTap(
-      vendors.find((v) => v.slug.toLowerCase() === slug.toLowerCase())?.id || '',
-      'profile'
-    );
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
-
-  const showToast = (type: 'success' | 'error' | 'info', title: string, message: string) => {
-    const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, type, title, message }]);
+  // ============================================================
+  // 9. TOAST SYSTEM
+  // ============================================================
+  const showToast = useCallback((type: 'success' | 'error' | 'info', title: string, message: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
+    setToasts(prev => [...prev, { id, type, title, message }]);
     setTimeout(() => {
-      removeToast(id);
+      setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
-  };
+  }, []);
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  const removeToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
-  const toggleFavorite = (vendorId: string) => {
+  // ============================================================
+  // 10. LANGUAGE
+  // ============================================================
+  const setLanguage = useCallback((lang: Language) => {
+    setLanguageState(lang);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ikorodusquare_lang', lang);
+    }
+  }, []);
+
+  const t = useCallback((key: string, defaultText?: string): string => {
+    const langObj = TRANSLATIONS[language];
+    if (langObj && langObj[key]) {
+      return langObj[key];
+    }
+    return defaultText || TRANSLATIONS['en'][key] || key;
+  }, [language]);
+
+  // ============================================================
+  // 11. FAVORITES
+  // ============================================================
+  const toggleFavorite = useCallback((vendorId: string) => {
     if (!currentUser) {
-      showToast('info', 'Sign in Required', 'Please sign in or register to save favourite businesses.');
+      showToast('info', 'Sign in Required', 'Please sign in to save favorites.');
       setCurrentPage('auth');
       return;
     }
     const updated = StorageManager.toggleFavorite(vendorId);
     setFavorites(updated);
-    showToast('success', 'Saved!', updated.includes(vendorId) ? 'Added to your favourites.' : 'Removed from favourites.');
-  };
+    showToast('success', 'Updated', updated.includes(vendorId) ? 'Added to favorites.' : 'Removed from favorites.');
+  }, [currentUser, showToast, setCurrentPage]);
 
-  const approveVendor = async (vendorId: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
+  // ============================================================
+  // 12. ADMIN ACTIONS
+  // ============================================================
+  const approveVendor = useCallback(async (vendorId: string) => {
+    const v = vendors.find(item => item.id === vendorId);
+    if (!v) {
+      showToast('error', 'Not Found', 'Vendor not found.');
+      return;
+    }
+
+    try {
+      const updatedVendor: Vendor = {
+        ...v,
+        status: 'approved',
+        isLive: true,
+        approvedAt: v.approvedAt || new Date().toISOString(),
+      };
+
+      StorageManager.updateVendor(updatedVendor);
+      refreshData();
+
+      const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
+      await ApiService.sendWhatsAppNotification(v.whatsapp, message);
+
+      showToast('success', 'Vendor Approved', `"${v.businessName}" is now live.`);
+    } catch (error) {
+      console.error('[AppContext] approveVendor error:', error);
+      showToast('error', 'Approval Failed', 'Could not approve vendor. Please try again.');
+    }
+  }, [vendors, refreshData, showToast]);
+
+  const unapproveVendor = useCallback(async (vendorId: string) => {
+    const v = vendors.find(item => item.id === vendorId);
+    if (!v) {
+      showToast('error', 'Not Found', 'Vendor not found.');
+      return;
+    }
+
+    try {
+      const updatedVendor: Vendor = {
+        ...v,
+        status: 'pending',
+        isLive: false,
+      };
+
+      StorageManager.updateVendor(updatedVendor);
+      refreshData();
+      showToast('info', 'Vendor Unapproved', `"${v.businessName}" set to pending.`);
+    } catch (error) {
+      console.error('[AppContext] unapproveVendor error:', error);
+      showToast('error', 'Action Failed', 'Could not unapprove vendor.');
+    }
+  }, [vendors, refreshData, showToast]);
+
+  const toggleVendorApproval = useCallback(async (vendorId: string) => {
+    const v = vendors.find(item => item.id === vendorId);
     if (!v) return;
-
-    const updatedVendor: Vendor = {
-      ...v,
-      status: 'approved',
-      isLive: true,
-      approvedAt: v.approvedAt || new Date().toISOString(),
-    };
-
-    StorageManager.updateVendor(updatedVendor);
-    refreshData();
-
-    // Send WhatsApp notification via Sendchamp API bridge
-    const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live to thousands of customers across Ikorodu! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
-    await ApiService.sendWhatsAppNotification(v.whatsapp, message);
-
-    showToast('success', 'Vendor Approved', `"${v.businessName}" is now live and public.`);
-  };
-
-  const unapproveVendor = async (vendorId: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
-    if (!v) return;
-
-    const updatedVendor: Vendor = {
-      ...v,
-      status: 'pending',
-      isLive: false,
-    };
-
-    StorageManager.updateVendor(updatedVendor);
-    refreshData();
-
-    showToast('info', 'Vendor Unapproved', `"${v.businessName}" status set to pending.`);
-  };
-
-  const toggleVendorApproval = async (vendorId: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
-    if (!v) return;
+    
     if (v.isLive || v.status === 'approved') {
       await unapproveVendor(vendorId);
     } else {
       await approveVendor(vendorId);
     }
-  };
+  }, [vendors, approveVendor, unapproveVendor]);
 
-  const toggleVendorVerification = async (vendorId: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
-    if (!v) return;
+  const toggleVendorVerification = useCallback(async (vendorId: string) => {
+    const v = vendors.find(item => item.id === vendorId);
+    if (!v) {
+      showToast('error', 'Not Found', 'Vendor not found.');
+      return;
+    }
 
-    const currentStatus = Boolean(v.ninVerified || v.nin_verified);
-    const newStatus = !currentStatus;
+    try {
+      const currentStatus = Boolean(v.ninVerified || v.nin_verified);
+      const newStatus = !currentStatus;
 
-    const updatedVendor: Vendor = {
-      ...v,
-      ninVerified: newStatus,
-      nin_verified: newStatus,
-      ninData: newStatus
-        ? (v.ninData || {
-            nin: '11111111111',
-            fullName: v.ownerName,
-            dob: '1990-01-01',
-            verifiedAt: new Date().toISOString(),
-          })
-        : v.ninData,
-    };
+      const updatedVendor: Vendor = {
+        ...v,
+        ninVerified: newStatus,
+        nin_verified: newStatus,
+        ninData: newStatus
+          ? (v.ninData || {
+              nin: '11111111111',
+              fullName: v.ownerName,
+              dob: '1990-01-01',
+              verifiedAt: new Date().toISOString(),
+            })
+          : v.ninData,
+      };
 
-    StorageManager.updateVendor(updatedVendor);
-    refreshData();
+      StorageManager.updateVendor(updatedVendor);
+      refreshData();
+      showToast(
+        newStatus ? 'success' : 'info',
+        newStatus ? 'Vendor Verified' : 'Verification Removed',
+        `"${v.businessName}" ${newStatus ? 'verified' : 'unverified'}.`
+      );
+    } catch (error) {
+      console.error('[AppContext] toggleVendorVerification error:', error);
+      showToast('error', 'Action Failed', 'Could not update verification status.');
+    }
+  }, [vendors, refreshData, showToast]);
 
-    showToast(
-      newStatus ? 'success' : 'info',
-      newStatus ? 'Vendor Verified' : 'Verification Removed',
-      `"${v.businessName}" ${newStatus ? 'is now verified' : 'verification removed'}.`
-    );
-  };
+  const toggleVendorFeatured = useCallback(async (vendorId: string) => {
+    const v = vendors.find(item => item.id === vendorId);
+    if (!v) {
+      showToast('error', 'Not Found', 'Vendor not found.');
+      return;
+    }
 
-  const toggleVendorFeatured = async (vendorId: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
-    if (!v) return;
+    try {
+      const currentFeatured = Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
+      const newFeatured = !currentFeatured;
 
-    const currentFeatured = Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
-    const newFeatured = !currentFeatured;
+      const updatedVendor: Vendor = {
+        ...v,
+        isFeatured: newFeatured,
+        is_featured: newFeatured,
+        featuredOnHomepage: newFeatured,
+      };
 
-    const updatedVendor: Vendor = {
-      ...v,
-      isFeatured: newFeatured,
-      is_featured: newFeatured,
-      featuredOnHomepage: newFeatured,
-    };
+      StorageManager.updateVendor(updatedVendor);
+      refreshData();
+      showToast(
+        newFeatured ? 'success' : 'info',
+        newFeatured ? 'Vendor Featured' : 'Removed from Featured',
+        `"${v.businessName}" ${newFeatured ? 'added to' : 'removed from'} featured.`
+      );
+    } catch (error) {
+      console.error('[AppContext] toggleVendorFeatured error:', error);
+      showToast('error', 'Action Failed', 'Could not update featured status.');
+    }
+  }, [vendors, refreshData, showToast]);
 
-    StorageManager.updateVendor(updatedVendor);
-    refreshData();
+  const rejectVendor = useCallback(async (vendorId: string, reason: string) => {
+    const v = vendors.find(item => item.id === vendorId);
+    if (!v) {
+      showToast('error', 'Not Found', 'Vendor not found.');
+      return;
+    }
 
-    showToast(
-      newFeatured ? 'success' : 'info',
-      newFeatured ? 'Vendor Featured' : 'Removed from Featured',
-      `"${v.businessName}" ${newFeatured ? 'added to' : 'removed from'} homepage Featured Businesses.`
-    );
-  };
+    try {
+      const updatedVendor: Vendor = {
+        ...v,
+        status: 'rejected',
+        isLive: false,
+      };
 
-  const rejectVendor = async (vendorId: string, reason: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
-    if (!v) return;
+      StorageManager.updateVendor(updatedVendor);
+      refreshData();
 
-    const updatedVendor: Vendor = {
-      ...v,
-      status: 'rejected',
-      isLive: false,
-    };
+      const message = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}. Please update your profile in your dashboard.`;
+      await ApiService.sendWhatsAppNotification(v.whatsapp, message);
 
-    StorageManager.updateVendor(updatedVendor);
-    refreshData();
+      showToast('info', 'Vendor Rejected', `Rejection notice sent to ${v.businessName}.`);
+    } catch (error) {
+      console.error('[AppContext] rejectVendor error:', error);
+      showToast('error', 'Action Failed', 'Could not reject vendor.');
+    }
+  }, [vendors, refreshData, showToast]);
 
-    // Send WhatsApp rejection notification
-    const message = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}. Please update your profile in your dashboard.`;
-    await ApiService.sendWhatsAppNotification(v.whatsapp, message);
+  const deleteVendor = useCallback(async (vendorId: string) => {
+    const v = vendors.find(item => item.id === vendorId);
+    try {
+      await StorageManager.deleteVendorAsync(vendorId);
+      refreshData();
+      showToast('info', 'Vendor Removed', `"${v?.businessName || 'Store'}" has been deleted.`);
+    } catch (error) {
+      console.error('[AppContext] deleteVendor error:', error);
+      showToast('error', 'Delete Failed', 'Could not delete vendor.');
+    }
+  }, [vendors, refreshData, showToast]);
 
-    showToast('info', 'Vendor Application Rejected', `Rejection notice sent via WhatsApp to ${v.businessName}.`);
-  };
+  // ============================================================
+  // 13. PROMOTION ACTIONS
+  // ============================================================
+  const createPromotionRequest = useCallback(async (promo: Promotion) => {
+    try {
+      StorageManager.createPromotionRequest(promo);
+      refreshData();
+      showToast('success', 'Promotion Requested', 'Your promotion request has been submitted for verification.');
+    } catch (error) {
+      console.error('[AppContext] createPromotionRequest error:', error);
+      showToast('error', 'Request Failed', 'Could not create promotion request.');
+    }
+  }, [refreshData, showToast]);
 
-  const deleteVendor = async (vendorId: string) => {
-    const v = vendors.find((item) => item.id === vendorId);
-    await StorageManager.deleteVendorAsync(vendorId);
-    refreshData();
-    showToast('info', 'Vendor Removed', `"${v?.businessName || 'Store'}" has been deleted from IkoroduSquare.`);
+  const activatePromotion = useCallback(async (promo: Promotion) => {
+    try {
+      StorageManager.activatePromotion(promo);
+      refreshData();
+      showToast('success', 'Promotion Active!', 'Your promotion has been activated.');
+    } catch (error) {
+      console.error('[AppContext] activatePromotion error:', error);
+      showToast('error', 'Activation Failed', 'Could not activate promotion.');
+    }
+  }, [refreshData, showToast]);
+
+  const updatePromotionStatus = useCallback(async (id: string, newStatus: PromotionStatus, extendDays: number = 0) => {
+    try {
+      StorageManager.updatePromotionStatus(id, newStatus, extendDays);
+      refreshData();
+      const readableStatus = newStatus === 'pending_verification' ? 'Pending Verification' : newStatus;
+      showToast('info', 'Promotion Updated', `Status updated to ${readableStatus}.`);
+    } catch (error) {
+      console.error('[AppContext] updatePromotionStatus error:', error);
+      showToast('error', 'Update Failed', 'Could not update promotion status.');
+    }
+  }, [refreshData, showToast]);
+
+  // ============================================================
+  // 14. SETTINGS
+  // ============================================================
+  const updateAdminSettings = useCallback((settings: AdminSettings) => {
+    try {
+      StorageManager.saveSettings(settings);
+      setAdminSettings(settings);
+      showToast('success', 'Settings Saved', 'Configuration updated.');
+    } catch (error) {
+      console.error('[AppContext] updateAdminSettings error:', error);
+      showToast('error', 'Save Failed', 'Could not save settings.');
+    }
+  }, [showToast]);
+
+  // ============================================================
+  // 15. CONTEXT VALUE
+  // ============================================================
+  const value: AppContextType = {
+    // Navigation
+    currentPage,
+    setCurrentPage,
+    activeVendorSlug,
+    setActiveVendorSlug,
+    navigateToStore,
+
+    // Authentication
+    currentUser,
+    isAuthLoading,
+    isAuthInitialized,
+
+    // Data
+    activeVendor,
+    vendors,
+    products,
+    reviews,
+    enquiries,
+    banners,
+    favorites,
+    promotions,
+    adminSettings,
+    updateAdminSettings,
+
+    // Loading
+    isLoading: isLoading || isAuthLoading,
+
+    // Search
+    searchType,
+    setSearchType,
+    searchQuery,
+    setSearchQuery,
+    selectedCategory,
+    setSelectedCategory,
+    selectedArea,
+    setSelectedArea,
+
+    // Actions
+    refreshData,
+    toggleFavorite,
+    showToast,
+    toasts,
+    removeToast,
+
+    // Promotions
+    createPromotionRequest,
+    activatePromotion,
+    updatePromotionStatus,
+
+    // Admin
+    approveVendor,
+    unapproveVendor,
+    toggleVendorApproval,
+    toggleVendorVerification,
+    toggleVendorFeatured,
+    rejectVendor,
+    deleteVendor,
+
+    // UI
+    showSetupModal,
+    setShowSetupModal,
+    isAdminMode,
+    setIsAdminMode,
+
+    // Language
+    language,
+    setLanguage,
+    t,
   };
 
   return (
-    <AppContext.Provider
-      value={{
-        currentPage,
-        setCurrentPage,
-        activeVendorSlug,
-        setActiveVendorSlug,
-        navigateToStore,
-        currentUser,
-        setCurrentUser,
-        activeVendor,
-        vendors,
-        products,
-        reviews,
-        enquiries,
-        banners,
-        favorites,
-        promotions,
-        adminSettings,
-        updateAdminSettings,
-        isLoading,
-        searchType,
-        setSearchType,
-        searchQuery,
-        setSearchQuery,
-        selectedCategory,
-        setSelectedCategory,
-        selectedArea,
-        setSelectedArea,
-        refreshData,
-        toggleFavorite,
-        showToast,
-        toasts,
-        removeToast,
-        createPromotionRequest,
-        activatePromotion,
-        updatePromotionStatus,
-        approveVendor,
-        unapproveVendor,
-        toggleVendorApproval,
-        toggleVendorVerification,
-        toggleVendorFeatured,
-        rejectVendor,
-        deleteVendor,
-        showSetupModal,
-        setShowSetupModal,
-        isAdminMode,
-        setIsAdminMode,
-        language,
-        setLanguage,
-        t,
-      }}
-    >
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   );
