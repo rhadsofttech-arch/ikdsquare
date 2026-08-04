@@ -34,10 +34,8 @@ interface AppContextType {
   adminSettings: AdminSettings;
   updateAdminSettings: (settings: AdminSettings) => void;
 
-  // Loading state for Firestore & initial sync
   isLoading: boolean;
 
-  // Search & Filter State
   searchType: 'business' | 'product';
   setSearchType: (type: 'business' | 'product') => void;
   searchQuery: string;
@@ -47,19 +45,16 @@ interface AppContextType {
   selectedArea: string;
   setSelectedArea: (area: string) => void;
 
-  // Actions
-  refreshData: () => void;
+  refreshData: () => Promise<void>;
   toggleFavorite: (vendorId: string) => void;
   showToast: (type: 'success' | 'error' | 'info', title: string, message: string) => void;
   toasts: Toast[];
   removeToast: (id: string) => void;
 
-  // Promotion Actions
   createPromotionRequest: (promo: Promotion) => Promise<void>;
   activatePromotion: (promo: Promotion) => Promise<void>;
   updatePromotionStatus: (id: string, newStatus: PromotionStatus, extendDays?: number) => Promise<void>;
 
-  // Admin Actions
   approveVendor: (vendorId: string) => Promise<void>;
   unapproveVendor: (vendorId: string) => Promise<void>;
   toggleVendorApproval: (vendorId: string) => Promise<void>;
@@ -68,15 +63,12 @@ interface AppContextType {
   rejectVendor: (vendorId: string, reason: string) => Promise<void>;
   deleteVendor: (vendorId: string) => Promise<void>;
 
-  // Store Setup Modal State
   showSetupModal: boolean;
   setShowSetupModal: (show: boolean) => void;
 
-  // Admin Mode Toggle for quick testing
   isAdminMode: boolean;
   setIsAdminMode: (admin: boolean) => void;
 
-  // Language Translation State
   language: Language;
   setLanguage: (lang: Language) => void;
   t: (key: string, defaultText?: string) => string;
@@ -84,17 +76,56 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** IDs of vendors the admin has explicitly deleted — never re-inject these. */
+function getDeletedVendorIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem('ikorodusquare_deleted_vendor_ids');
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const VENDORS_KEY = 'ikorodusquare_vendors_v1';
+
+/**
+ * Pull the latest vendor list directly from Supabase and write it into
+ * localStorage so that StorageManager.getVendors() returns fresh data.
+ * Respects the deleted-vendor tombstone list so soft-deleted records are
+ * never re-injected from the database.
+ */
+async function syncVendorsFromSupabase(): Promise<void> {
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase.from('vendors').select('*');
+    if (error || !data) return;
+
+    const deletedIds = getDeletedVendorIds();
+    const fresh = data
+      .map((r: any) => rowToVendor(r))
+      .filter((v: Vendor) => !deletedIds.has(v.id));
+
+    localStorage.setItem(VENDORS_KEY, JSON.stringify(fresh));
+  } catch (e) {
+    console.warn('[syncVendorsFromSupabase] failed, using cached data:', e);
+  }
+}
+
+// ── Provider ───────────────────────────────────────────────────────────────
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+
+  // ── Route helpers ──────────────────────────────────────────────────────
+
   const getInitialPageAndSlug = () => {
     if (typeof window === 'undefined') return { page: 'home', slug: null, adminMode: false };
 
-    // 1. Check Query Params (?store=slug or ?vendor=slug or ?shop=slug)
     if (window.location.search) {
       const searchParams = new URLSearchParams(window.location.search);
       const storeQuery = searchParams.get('store') || searchParams.get('vendor') || searchParams.get('shop');
-      if (storeQuery) {
-        return { page: 'store', slug: decodeURIComponent(storeQuery.trim()), adminMode: false };
-      }
+      if (storeQuery) return { page: 'store', slug: decodeURIComponent(storeQuery.trim()), adminMode: false };
       const pageQuery = searchParams.get('page');
       if (pageQuery) {
         const p = pageQuery.toLowerCase();
@@ -107,83 +138,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 2. Check Hash (#/admin, #/store/slug, #/vendor/slug, #/dashboard, etc.)
     if (window.location.hash && window.location.hash.startsWith('#')) {
       const rawHash = window.location.hash.replace(/^#\/?/, '').trim();
       const hashLower = rawHash.toLowerCase();
-      if (hashLower === 'admin' || hashLower.startsWith('admin/')) {
-        return { page: 'admin', slug: null, adminMode: true };
-      }
-      if (hashLower.startsWith('store/')) {
-        const slug = decodeURIComponent(rawHash.substring(6).trim());
-        return { page: 'store', slug: slug || null, adminMode: false };
-      }
-      if (hashLower.startsWith('vendor/')) {
-        const slug = decodeURIComponent(rawHash.substring(7).trim());
-        return { page: 'store', slug: slug || null, adminMode: false };
-      }
-      if (hashLower.startsWith('shop/')) {
-        const slug = decodeURIComponent(rawHash.substring(5).trim());
-        return { page: 'store', slug: slug || null, adminMode: false };
-      }
-      if (hashLower === 'auth' || hashLower === 'login') {
-        return { page: 'auth', slug: null, adminMode: false };
-      }
-      if (hashLower === 'forgot-password' || hashLower === 'forgot') {
-        return { page: 'forgot-password', slug: null, adminMode: false };
-      }
-      if (hashLower === 'reset-password' || hashLower === 'reset' || hashLower.includes('access_token')) {
-        return { page: 'reset-password', slug: null, adminMode: false };
-      }
-      if (hashLower === 'dashboard' || hashLower === 'vendor-dashboard') {
-        return { page: 'dashboard', slug: null, adminMode: false };
-      }
-      if (hashLower === 'profile' || hashLower === 'user-profile') {
-        return { page: 'profile', slug: null, adminMode: false };
-      }
-      if (hashLower === 'home' || hashLower === '') {
-        return { page: 'home', slug: null, adminMode: false };
-      }
+      if (hashLower === 'admin' || hashLower.startsWith('admin/')) return { page: 'admin', slug: null, adminMode: true };
+      if (hashLower.startsWith('store/')) return { page: 'store', slug: decodeURIComponent(rawHash.substring(6).trim()) || null, adminMode: false };
+      if (hashLower.startsWith('vendor/')) return { page: 'store', slug: decodeURIComponent(rawHash.substring(7).trim()) || null, adminMode: false };
+      if (hashLower.startsWith('shop/')) return { page: 'store', slug: decodeURIComponent(rawHash.substring(5).trim()) || null, adminMode: false };
+      if (hashLower === 'auth' || hashLower === 'login') return { page: 'auth', slug: null, adminMode: false };
+      if (hashLower === 'forgot-password' || hashLower === 'forgot') return { page: 'forgot-password', slug: null, adminMode: false };
+      if (hashLower === 'reset-password' || hashLower === 'reset' || hashLower.includes('access_token')) return { page: 'reset-password', slug: null, adminMode: false };
+      if (hashLower === 'dashboard' || hashLower === 'vendor-dashboard') return { page: 'dashboard', slug: null, adminMode: false };
+      if (hashLower === 'profile' || hashLower === 'user-profile') return { page: 'profile', slug: null, adminMode: false };
+      if (hashLower === 'home' || hashLower === '') return { page: 'home', slug: null, adminMode: false };
     }
 
-    // 3. Check Pathname (/admin, /admin/..., /store/slug, /vendor/slug, etc.)
     const path = window.location.pathname;
     const pathLower = path.toLowerCase();
-    if (pathLower === '/admin' || pathLower === '/admin/' || pathLower.startsWith('/admin/')) {
-      return { page: 'admin', slug: null, adminMode: true };
-    }
-    if (pathLower.startsWith('/store/')) {
-      const slug = decodeURIComponent(path.substring(7).trim().replace(/\/$/, ''));
-      return { page: 'store', slug: slug || null, adminMode: false };
-    }
-    if (pathLower.startsWith('/vendor/')) {
-      const slug = decodeURIComponent(path.substring(8).trim().replace(/\/$/, ''));
-      return { page: 'store', slug: slug || null, adminMode: false };
-    }
-    if (pathLower.startsWith('/shop/')) {
-      const slug = decodeURIComponent(path.substring(6).trim().replace(/\/$/, ''));
-      return { page: 'store', slug: slug || null, adminMode: false };
-    }
-    if (pathLower === '/auth' || pathLower === '/login') {
-      return { page: 'auth', slug: null, adminMode: false };
-    }
-    if (pathLower === '/dashboard' || pathLower === '/vendor-dashboard') {
-      return { page: 'dashboard', slug: null, adminMode: false };
-    }
-    if (pathLower === '/profile' || pathLower === '/user-profile') {
-      return { page: 'profile', slug: null, adminMode: false };
-    }
+    if (pathLower === '/admin' || pathLower === '/admin/' || pathLower.startsWith('/admin/')) return { page: 'admin', slug: null, adminMode: true };
+    if (pathLower.startsWith('/store/')) return { page: 'store', slug: decodeURIComponent(path.substring(7).trim().replace(/\/$/, '')) || null, adminMode: false };
+    if (pathLower.startsWith('/vendor/')) return { page: 'store', slug: decodeURIComponent(path.substring(8).trim().replace(/\/$/, '')) || null, adminMode: false };
+    if (pathLower.startsWith('/shop/')) return { page: 'store', slug: decodeURIComponent(path.substring(6).trim().replace(/\/$/, '')) || null, adminMode: false };
+    if (pathLower === '/auth' || pathLower === '/login') return { page: 'auth', slug: null, adminMode: false };
+    if (pathLower === '/dashboard' || pathLower === '/vendor-dashboard') return { page: 'dashboard', slug: null, adminMode: false };
+    if (pathLower === '/profile' || pathLower === '/user-profile') return { page: 'profile', slug: null, adminMode: false };
 
-    // 4. Fallback to localStorage saved page state
     try {
       const savedPage = localStorage.getItem('ikorodusquare_last_page');
       const savedSlug = localStorage.getItem('ikorodusquare_last_slug');
       if (savedPage) {
         if (savedPage === 'admin') return { page: 'admin', slug: null, adminMode: true };
         if (savedPage === 'store' && savedSlug) return { page: 'store', slug: savedSlug, adminMode: false };
-        if (['auth', 'dashboard', 'profile', 'home'].includes(savedPage)) {
-          return { page: savedPage, slug: null, adminMode: false };
-        }
+        if (['auth', 'dashboard', 'profile', 'home'].includes(savedPage)) return { page: savedPage, slug: null, adminMode: false };
       }
     } catch (e) {
       console.error('Failed to read saved page from localStorage', e);
@@ -194,14 +180,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateUrlAndStorage = (page: string, slug: string | null = null) => {
     if (typeof window === 'undefined') return;
-
     try {
       localStorage.setItem('ikorodusquare_last_page', page);
-      if (slug) {
-        localStorage.setItem('ikorodusquare_last_slug', slug);
-      } else {
-        localStorage.removeItem('ikorodusquare_last_slug');
-      }
+      if (slug) localStorage.setItem('ikorodusquare_last_slug', slug);
+      else localStorage.removeItem('ikorodusquare_last_slug');
     } catch (e) {
       console.error('Failed to save route state to localStorage', e);
     }
@@ -212,12 +194,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     else if (page === 'dashboard') targetPath = '/dashboard';
     else if (page === 'auth') targetPath = '/auth';
     else if (page === 'profile') targetPath = '/profile';
-    else targetPath = '/';
 
     if (window.location.pathname !== targetPath || window.location.hash !== '') {
       window.history.pushState({}, '', targetPath);
     }
   };
+
+  // ── State ──────────────────────────────────────────────────────────────
 
   const initialNav = getInitialPageAndSlug();
   const [currentPage, setCurrentPageState] = useState<string>(initialNav.page);
@@ -235,13 +218,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => StorageManager.getSettings());
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Search & Filter State
   const [searchType, setSearchType] = useState<'business' | 'product'>('business');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedArea, setSelectedArea] = useState<string>('All');
 
-  // Admin & Modal & Language
   const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
   const [isAdminMode, setIsAdminMode] = useState<boolean>(initialNav.adminMode);
   const [language, setLanguageState] = useState<Language>(() => {
@@ -252,23 +233,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'en';
   });
 
+  // ── Language ───────────────────────────────────────────────────────────
+
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('ikorodusquare_lang', lang);
-    }
+    if (typeof window !== 'undefined') localStorage.setItem('ikorodusquare_lang', lang);
   };
 
   const t = (key: string, defaultText?: string): string => {
     const langObj = TRANSLATIONS[language];
-    if (langObj && langObj[key]) {
-      return langObj[key];
-    }
+    if (langObj && langObj[key]) return langObj[key];
     return defaultText || TRANSLATIONS['en'][key] || key;
   };
 
+  // ── Navigation ─────────────────────────────────────────────────────────
+
   const setCurrentPage = (page: string) => {
-    // Route Protection for authenticated pages
     const isEffectiveAdmin = isAdminMode || currentUser?.role === 'admin';
     const protectedPages = ['dashboard', 'admin', 'profile', 'user-profile'];
     if (protectedPages.includes(page) && !currentUser && !isEffectiveAdmin && page !== 'admin') {
@@ -277,19 +257,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateUrlAndStorage('auth', null);
       return;
     }
-
     setCurrentPageState(page);
-    if (page === 'admin') {
-      setIsAdminMode(true);
-    }
+    if (page === 'admin') setIsAdminMode(true);
     updateUrlAndStorage(page, page === 'store' ? activeVendorSlug : null);
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const refreshData = () => {
+  // ── Core data refresh ──────────────────────────────────────────────────
+  //
+  // FIX: refreshData is now async and always pulls vendors fresh from
+  // Supabase before updating React state. This ensures a newly registered
+  // vendor (status='pending') is immediately visible in the approval queue
+  // without waiting for the realtime subscription to fire.
+
+  const refreshData = async (): Promise<void> => {
     StorageManager.checkAndSyncPromotionExpiries();
+
+    // Always re-fetch the vendor list from Supabase so the approval queue
+    // reflects what is actually in the database, not a stale localStorage
+    // snapshot that may predate the most recent registration.
+    await syncVendorsFromSupabase();
+
     setPromotions(StorageManager.getPromotions());
     setAdminSettings(StorageManager.getSettings());
     setVendors(StorageManager.getVendors());
@@ -300,35 +288,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFavorites(StorageManager.getFavorites());
   };
 
+  // ── Settings ───────────────────────────────────────────────────────────
+
   const updateAdminSettings = (settings: AdminSettings) => {
     StorageManager.saveSettings(settings);
     setAdminSettings(settings);
     showToast('success', 'Settings Saved', 'Bank account and WhatsApp support settings updated.');
   };
 
+  // ── Promotions ─────────────────────────────────────────────────────────
+
   const createPromotionRequest = async (promo: Promotion) => {
     StorageManager.createPromotionRequest(promo);
-    refreshData();
+    await refreshData();
   };
 
   const activatePromotion = async (promo: Promotion) => {
     StorageManager.activatePromotion(promo);
-    refreshData();
+    await refreshData();
     showToast('success', 'Promotion Active!', 'Your promotion has been verified and activated.');
   };
 
   const updatePromotionStatus = async (id: string, newStatus: PromotionStatus, extendDays: number = 0) => {
     StorageManager.updatePromotionStatus(id, newStatus, extendDays);
-    refreshData();
+    await refreshData();
     const readableStatus = newStatus === 'pending_verification' ? 'Pending Verification' : newStatus;
     showToast('info', 'Promotion Updated', `Promotion status updated to ${readableStatus}.`);
   };
+
+  // ── Auth resolution ────────────────────────────────────────────────────
 
   const resolveUserFromSupabase = async (supaUser: any): Promise<User> => {
     const email = supaUser.email || '';
     const isAdmin = isAdminEmail(email);
 
-    // Direct DB lookup for vendor record matching email
     let matchingVendor: Vendor | null = null;
     if (supabase) {
       try {
@@ -337,9 +330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .select('*')
           .ilike('email', email)
           .maybeSingle();
-        if (supaVendor) {
-          matchingVendor = rowToVendor(supaVendor);
-        }
+        if (supaVendor) matchingVendor = rowToVendor(supaVendor);
       } catch (e) {
         console.warn('Supabase vendor resolution query warning:', e);
       }
@@ -350,15 +341,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       matchingVendor = localVendors.find((v) => v.email?.toLowerCase() === email.toLowerCase()) || null;
     }
 
-    // Direct DB lookup for users table record
     let supaUserRow: any = null;
     if (supabase) {
       try {
-        const { data: uRow } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', supaUser.id)
-          .maybeSingle();
+        const { data: uRow } = await supabase.from('users').select('*').eq('id', supaUser.id).maybeSingle();
         if (uRow) supaUserRow = uRow;
       } catch (e) {
         console.warn('Supabase user row resolution query warning:', e);
@@ -395,69 +381,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // ── Boot effect ────────────────────────────────────────────────────────
+  //
+  // FIX: initFirestoreSync's callback and its .then() both previously called
+  // refreshData(), creating a race condition where two concurrent re-fetches
+  // would stomp each other and could miss a newly registered vendor.
+  //
+  // Now only the .then() path calls refreshData() (once). The callback only
+  // updates the syncComplete flag and calls checkHydrationComplete so the
+  // loading spinner clears at the right time. The extra re-fetch in the
+  // callback is removed.
+
   useEffect(() => {
     let isMounted = true;
-    refreshData();
+
+    // Populate UI immediately from local cache while the network call runs
+    const seedFromCache = () => {
+      if (!isMounted) return;
+      setPromotions(StorageManager.getPromotions());
+      setAdminSettings(StorageManager.getSettings());
+      setVendors(StorageManager.getVendors());
+      setProducts(StorageManager.getProducts());
+      setReviews(StorageManager.getReviews());
+      setEnquiries(StorageManager.getEnquiries());
+      setBanners(StorageManager.getBanners());
+      setFavorites(StorageManager.getFavorites());
+    };
+
+    seedFromCache();
 
     let authComplete = false;
     let syncComplete = false;
 
     const checkHydrationComplete = () => {
-      if (authComplete && syncComplete && isMounted) {
-        setIsLoading(false);
-      }
+      if (authComplete && syncComplete && isMounted) setIsLoading(false);
     };
 
-    // Safety fallback timer so loading never hangs if offline or delayed
+    // Safety timer so the loading state never hangs when offline
     const fallbackTimer = setTimeout(() => {
-      if (isMounted) {
-        setIsLoading(false);
-      }
+      if (isMounted) setIsLoading(false);
     }, 2500);
 
-    // Initial Database Sync (Supabase / Storage)
+    // FIX: only one code path calls refreshData() after the initial sync.
+    // The callback simply marks sync as done; the .then() does the single
+    // authoritative fetch from Supabase and updates React state.
     StorageManager.initFirestoreSync(() => {
-      if (isMounted) {
-        refreshData();
-        syncComplete = true;
-        checkHydrationComplete();
-      }
-    }).then(() => {
-      if (isMounted) {
-        refreshData();
-        syncComplete = true;
-        checkHydrationComplete();
-      }
-    }).catch((e) => {
-      console.warn('[Hydration Sync Warning]:', e);
+      // Callback fires when the realtime subscription delivers its first
+      // event. Just mark sync complete — the .then() already handled the
+      // initial data load.
       if (isMounted) {
         syncComplete = true;
         checkHydrationComplete();
       }
-    });
-
-    // Initial Supabase Auth session restoration
-    let authSubscription: { unsubscribe: () => void } | null = null;
-    if (supabase) {
-      supabase.auth.getSession().then(async ({ data: { session } }) => {
-        if (session?.user && isMounted) {
-          const syncedUser = await resolveUserFromSupabase(session.user);
-          if (isMounted) setCurrentUser(syncedUser);
-        } else if (isMounted) {
-          setCurrentUser(null);
-        }
-        authComplete = true;
-        checkHydrationComplete();
-      }).catch((e) => {
-        console.warn('[Hydration Auth Error]:', e);
+    })
+      .then(async () => {
         if (isMounted) {
-          authComplete = true;
+          // Single authoritative refresh: pulls vendors fresh from Supabase
+          // so a vendor who registered moments ago already appears pending.
+          await refreshData();
+          syncComplete = true;
+          checkHydrationComplete();
+        }
+      })
+      .catch((e) => {
+        console.warn('[Hydration Sync Warning]:', e);
+        if (isMounted) {
+          syncComplete = true;
           checkHydrationComplete();
         }
       });
 
+    // Auth session restoration
+    let authSubscription: { unsubscribe: () => void } | null = null;
+    if (supabase) {
+      supabase.auth
+        .getSession()
+        .then(async ({ data: { session } }) => {
+          if (session?.user && isMounted) {
+            const syncedUser = await resolveUserFromSupabase(session.user);
+            if (isMounted) setCurrentUser(syncedUser);
+          } else if (isMounted) {
+            setCurrentUser(null);
+          }
+          authComplete = true;
+          checkHydrationComplete();
+        })
+        .catch((e) => {
+          console.warn('[Hydration Auth Error]:', e);
+          if (isMounted) {
+            authComplete = true;
+            checkHydrationComplete();
+          }
+        });
+
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!isMounted) return;
+
         if (event === 'PASSWORD_RECOVERY') {
           setCurrentPageState('reset-password');
           showToast('info', 'Reset Password', 'Verification code confirmed. Please set your new password below.');
@@ -476,6 +495,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (isMounted) setCurrentUser(null);
         }
       });
+
       authSubscription = data.subscription;
     } else {
       authComplete = true;
@@ -489,6 +509,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // ── URL sync effect ────────────────────────────────────────────────────
+
   useEffect(() => {
     const handleUrlChange = () => {
       const nav = getInitialPageAndSlug();
@@ -500,7 +522,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
 
-    // Initial sync of route & storage
     if (typeof window !== 'undefined') {
       const nav = getInitialPageAndSlug();
       let targetPath = '/';
@@ -513,6 +534,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (window.location.pathname !== targetPath || window.location.hash !== '') {
         window.history.replaceState({}, '', targetPath);
       }
+
       try {
         localStorage.setItem('ikorodusquare_last_page', nav.page);
         if (nav.slug) localStorage.setItem('ikorodusquare_last_slug', nav.slug);
@@ -527,7 +549,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Derived active vendor if logged in vendor or viewing store
+  // ── Derived state ──────────────────────────────────────────────────────
+
   const activeVendor = currentUser
     ? vendors.find(
         (v) =>
@@ -538,6 +561,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ) || null
     : null;
 
+  // ── UI helpers ─────────────────────────────────────────────────────────
+
   const navigateToStore = (slug: string) => {
     setActiveVendorSlug(slug);
     setCurrentPageState('store');
@@ -546,17 +571,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       vendors.find((v) => v.slug.toLowerCase() === slug.toLowerCase())?.id || '',
       'profile'
     );
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const showToast = (type: 'success' | 'error' | 'info', title: string, message: string) => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, type, title, message }]);
-    setTimeout(() => {
-      removeToast(id);
-    }, 5000);
+    setTimeout(() => removeToast(id), 5000);
   };
 
   const removeToast = (id: string) => {
@@ -574,6 +595,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('success', 'Saved!', updated.includes(vendorId) ? 'Added to your favourites.' : 'Removed from favourites.');
   };
 
+  // ── Admin vendor actions ───────────────────────────────────────────────
+
   const approveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
@@ -586,9 +609,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     StorageManager.updateVendor(updatedVendor);
-    refreshData();
+    await refreshData();
 
-    // Send WhatsApp notification via Sendchamp API bridge
     const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live to thousands of customers across Ikorodu! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
     await ApiService.sendWhatsAppNotification(v.whatsapp, message);
 
@@ -599,14 +621,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
 
-    const updatedVendor: Vendor = {
-      ...v,
-      status: 'pending',
-      isLive: false,
-    };
-
+    const updatedVendor: Vendor = { ...v, status: 'pending', isLive: false };
     StorageManager.updateVendor(updatedVendor);
-    refreshData();
+    await refreshData();
 
     showToast('info', 'Vendor Unapproved', `"${v.businessName}" status set to pending.`);
   };
@@ -643,7 +660,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     StorageManager.updateVendor(updatedVendor);
-    refreshData();
+    await refreshData();
 
     showToast(
       newStatus ? 'success' : 'info',
@@ -667,7 +684,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     StorageManager.updateVendor(updatedVendor);
-    refreshData();
+    await refreshData();
 
     showToast(
       newFeatured ? 'success' : 'info',
@@ -680,16 +697,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
 
-    const updatedVendor: Vendor = {
-      ...v,
-      status: 'rejected',
-      isLive: false,
-    };
-
+    const updatedVendor: Vendor = { ...v, status: 'rejected', isLive: false };
     StorageManager.updateVendor(updatedVendor);
-    refreshData();
+    await refreshData();
 
-    // Send WhatsApp rejection notification
     const message = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}. Please update your profile in your dashboard.`;
     await ApiService.sendWhatsAppNotification(v.whatsapp, message);
 
@@ -699,9 +710,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     await StorageManager.deleteVendorAsync(vendorId);
-    refreshData();
+    await refreshData();
     showToast('info', 'Vendor Removed', `"${v?.businessName || 'Store'}" has been deleted from IkoroduSquare.`);
   };
+
+  // ── Provider render ────────────────────────────────────────────────────
 
   return (
     <AppContext.Provider
@@ -763,8 +776,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useApp = () => {
   const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
+  if (!context) throw new Error('useApp must be used within an AppProvider');
   return context;
 };

@@ -2,21 +2,21 @@ import { Vendor, Product, Review, Enquiry, User, BannerAd, Order, DeliveryAddres
 import { SEED_VENDORS, SEED_PRODUCTS, SEED_REVIEWS, INITIAL_BANNER_ADS, INITIAL_PROMOTIONS } from './ikoroduData';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
-const VENDORS_KEY = 'ikorodusquare_vendors_v1';
-const PRODUCTS_KEY = 'ikorodusquare_products_v1';
-const REVIEWS_KEY = 'ikorodusquare_reviews_v1';
+const VENDORS_KEY   = 'ikorodusquare_vendors_v1';
+const PRODUCTS_KEY  = 'ikorodusquare_products_v1';
+const REVIEWS_KEY   = 'ikorodusquare_reviews_v1';
 const ENQUIRIES_KEY = 'ikorodusquare_enquiries_v1';
-const USERS_KEY = 'ikorodusquare_users_v1';
+const USERS_KEY     = 'ikorodusquare_users_v1';
 const CURRENT_USER_KEY = 'ikorodusquare_current_user_v1';
 const FAVORITES_KEY = 'ikorodusquare_favorites_v1';
-const BANNERS_KEY = 'ikorodusquare_banners_v1';
-const ORDERS_KEY = 'ikorodusquare_orders_v1';
+const BANNERS_KEY   = 'ikorodusquare_banners_v1';
+const ORDERS_KEY    = 'ikorodusquare_orders_v1';
 const PROMOTIONS_KEY = 'ikorodusquare_promotions_v1';
-const SETTINGS_KEY = 'ikorodusquare_settings_v2';
+const SETTINGS_KEY  = 'ikorodusquare_settings_v2';
 
-// ─── Delete-tracking keys ──────────────────────────────────────────────────
-// These persist the IDs of seed records the admin has explicitly deleted so
-// that getVendors() / getProducts() never re-inject them on the next read.
+// ── Delete-tracking tombstone keys ─────────────────────────────────────────
+// Persists IDs of seed records the admin has explicitly deleted so that
+// getVendors() / getProducts() never re-inject them on subsequent reads.
 const DELETED_VENDOR_IDS_KEY  = 'ikorodusquare_deleted_vendor_ids';
 const DELETED_PRODUCT_IDS_KEY = 'ikorodusquare_deleted_product_ids';
 
@@ -28,7 +28,7 @@ export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
     area: 'Agric',
     landmark: 'Opposite First Bank, Yellow Gate',
     phone: '08023456789',
-    isDefault: true
+    isDefault: true,
   },
   {
     id: 'addr_2',
@@ -37,8 +37,8 @@ export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
     area: 'Sabo Market',
     landmark: 'Near Zenith Bank ATM',
     phone: '08023456789',
-    isDefault: false
-  }
+    isDefault: false,
+  },
 ];
 
 export const SEED_ORDERS: Order[] = [
@@ -62,7 +62,7 @@ export const SEED_ORDERS: Order[] = [
         quantity: 1,
         vendorId: 'v1',
         vendorName: 'Ikorodu Tech & Gadget Hub',
-        vendorSlug: 'ikorodu-tech-gadget-hub'
+        vendorSlug: 'ikorodu-tech-gadget-hub',
       },
       {
         id: 'item_2',
@@ -72,8 +72,8 @@ export const SEED_ORDERS: Order[] = [
         quantity: 2,
         vendorId: 'v1',
         vendorName: 'Ikorodu Tech & Gadget Hub',
-        vendorSlug: 'ikorodu-tech-gadget-hub'
-      }
+        vendorSlug: 'ikorodu-tech-gadget-hub',
+      },
     ],
     totalAmount: 31500,
     status: 'dispatched',
@@ -81,7 +81,7 @@ export const SEED_ORDERS: Order[] = [
     paymentMethod: 'pay_on_delivery',
     notes: 'Please call before heading down from Sabo Bus Stop.',
     createdAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-    updatedAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString()
+    updatedAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
   },
   {
     id: 'ord_102',
@@ -103,8 +103,8 @@ export const SEED_ORDERS: Order[] = [
         quantity: 1,
         vendorId: 'v2',
         vendorName: 'Elegance Fabrics & Ready-to-Wear',
-        vendorSlug: 'elegance-fabrics-ikorodu'
-      }
+        vendorSlug: 'elegance-fabrics-ikorodu',
+      },
     ],
     totalAmount: 18000,
     status: 'delivered',
@@ -112,8 +112,8 @@ export const SEED_ORDERS: Order[] = [
     paymentMethod: 'bank_transfer',
     notes: 'Delivered directly to shop office.',
     createdAt: new Date(Date.now() - 3600 * 1000 * 48).toISOString(),
-    updatedAt: new Date(Date.now() - 3600 * 1000 * 24).toISOString()
-  }
+    updatedAt: new Date(Date.now() - 3600 * 1000 * 24).toISOString(),
+  },
 ];
 
 export const SEED_ENQUIRIES: Enquiry[] = [
@@ -144,7 +144,47 @@ export const SEED_ENQUIRIES: Enquiry[] = [
   },
 ];
 
-// ─── Data Mappers between TypeScript and Supabase PostgreSQL schema ────────
+// ── Delete-tracking helpers ────────────────────────────────────────────────
+
+export function getDeletedVendorIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_VENDOR_IDS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDeletedVendorId(vendorId: string): void {
+  try {
+    const ids = getDeletedVendorIds();
+    ids.add(vendorId);
+    localStorage.setItem(DELETED_VENDOR_IDS_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getDeletedProductIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_PRODUCT_IDS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDeletedProductId(productId: string): void {
+  try {
+    const ids = getDeletedProductIds();
+    ids.add(productId);
+    localStorage.setItem(DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+// ── Data mappers ───────────────────────────────────────────────────────────
 
 export async function generateUniqueVendorSlug(businessName: string): Promise<string> {
   const baseSlug = (businessName || 'vendor-store')
@@ -205,8 +245,11 @@ export function vendorToRow(v: Vendor) {
     address: v.address,
     cover_photo_url: v.coverPhotoURL,
     logo_url: v.logoURL,
-    status: v.status,
-    is_live: v.isLive,
+    // FIX: always serialise status and is_live explicitly so the DB row
+    // never falls back to a column default that could silently approve a
+    // newly registered vendor.
+    status: v.status || 'pending',
+    is_live: v.isLive ?? false,
     is_premium: v.isPremium,
     nin_verified: v.ninVerified ?? v.nin_verified ?? false,
     is_featured: isFeaturedVal,
@@ -217,6 +260,8 @@ export function vendorToRow(v: Vendor) {
   };
 }
 
+// FIX: default status is now 'pending', not 'approved'.
+// A null/undefined status from the DB should never silently approve a vendor.
 export function rowToVendor(r: any): Vendor {
   const isFeaturedVal = Boolean(r.is_featured ?? r.isFeatured ?? r.featuredOnHomepage ?? false);
   const ninVerifiedVal = Boolean(r.nin_verified ?? r.ninVerified ?? false);
@@ -237,8 +282,12 @@ export function rowToVendor(r: any): Vendor {
     address: r.address || '',
     coverPhotoURL: r.cover_photo_url || r.coverPhotoURL || '',
     logoURL: r.logo_url || r.logoURL || '',
-    status: r.status || 'approved',
-    isLive: r.is_live ?? r.isLive ?? true,
+    // FIX: was `r.status || 'approved'` — a falsy status would silently
+    // approve every vendor whose row had no status value.
+    status: (r.status as Vendor['status']) || 'pending',
+    // FIX: was `r.is_live ?? r.isLive ?? true` — defaulting to true meant
+    // a vendor could go live without ever being approved.
+    isLive: r.is_live ?? r.isLive ?? false,
     isPremium: r.is_premium ?? r.isPremium ?? false,
     ninVerified: ninVerifiedVal,
     nin_verified: ninVerifiedVal,
@@ -407,48 +456,12 @@ function userToRow(u: User) {
   };
 }
 
-// ─── Internal helpers for delete-tracking ─────────────────────────────────
-
-function getDeletedVendorIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DELETED_VENDOR_IDS_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function persistDeletedVendorId(vendorId: string): void {
-  try {
-    const ids = getDeletedVendorIds();
-    ids.add(vendorId);
-    localStorage.setItem(DELETED_VENDOR_IDS_KEY, JSON.stringify(Array.from(ids)));
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function getDeletedProductIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DELETED_PRODUCT_IDS_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function persistDeletedProductId(productId: string): void {
-  try {
-    const ids = getDeletedProductIds();
-    ids.add(productId);
-    localStorage.setItem(DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(ids)));
-  } catch {
-    // ignore storage errors
-  }
-}
+// ── StorageManager ─────────────────────────────────────────────────────────
 
 export class StorageManager {
-  // Recovery script function: Repairs orphaned vendor users in public.users without corresponding public.vendors records
+
+  // ── Orphan repair ────────────────────────────────────────────────────────
+
   static async repairOrphanedVendorsAsync(): Promise<number> {
     if (!supabase || !isSupabaseConfigured()) {
       console.log('[Repair Script]: Supabase not configured. Skipping orphan vendor repair.');
@@ -458,7 +471,6 @@ export class StorageManager {
     try {
       console.log('🔍 [Repair Script] Scanning public.users for vendor users without corresponding public.vendors records...');
 
-      // 1. Fetch vendor users from public.users table
       const { data: vendorUsers, error: userErr } = await supabase
         .from('users')
         .select('*')
@@ -474,39 +486,32 @@ export class StorageManager {
         return 0;
       }
 
-      // 2. Fetch existing vendors from public.vendors table
-      const { data: existingVendorRows, error: vendorErr } = await supabase
-        .from('vendors')
-        .select('*');
-
+      const { data: existingVendorRows, error: vendorErr } = await supabase.from('vendors').select('*');
       if (vendorErr) {
         console.error('❌ [Repair Script] Error querying public.vendors:', vendorErr.message, vendorErr.details, vendorErr.code, vendorErr.hint);
         return 0;
       }
 
-      const existingVendors = (existingVendorRows || []).map(rowToVendor);
-      const existingEmails = new Set(
-        existingVendors.map((v) => v.email?.toLowerCase().trim()).filter(Boolean)
-      );
-      const existingVendorIds = new Set(
-        existingVendors.map((v) => v.id).filter(Boolean)
-      );
-      const existingSlugs = new Set(
-        existingVendors.map((v) => v.slug?.toLowerCase().trim()).filter(Boolean)
-      );
+      const existingVendors   = (existingVendorRows || []).map(rowToVendor);
+      const existingEmails    = new Set(existingVendors.map((v) => v.email?.toLowerCase().trim()).filter(Boolean));
+      const existingVendorIds = new Set(existingVendors.map((v) => v.id).filter(Boolean));
+      const existingSlugs     = new Set(existingVendors.map((v) => v.slug?.toLowerCase().trim()).filter(Boolean));
 
       let repairedCount = 0;
 
       for (const u of vendorUsers) {
-        const uEmail = (u.email || '').toLowerCase().trim();
+        const uEmail    = (u.email || '').toLowerCase().trim();
         const uVendorId = u.vendor_id;
 
-        // Check if vendor already exists by email or vendor_id
-        const vendorExists = (uEmail && existingEmails.has(uEmail)) || (uVendorId && existingVendorIds.has(uVendorId));
+        const vendorExists =
+          (uEmail && existingEmails.has(uEmail)) ||
+          (uVendorId && existingVendorIds.has(uVendorId));
 
         if (vendorExists) {
           const existingVendor = existingVendors.find(
-            (v) => (uEmail && v.email?.toLowerCase().trim() === uEmail) || (uVendorId && v.id === uVendorId)
+            (v) =>
+              (uEmail && v.email?.toLowerCase().trim() === uEmail) ||
+              (uVendorId && v.id === uVendorId)
           );
           if (existingVendor && u.vendor_id !== existingVendor.id) {
             console.log(`[Repair Script] Linking existing vendor ID "${existingVendor.id}" to user "${u.id}" in public.users...`);
@@ -517,15 +522,11 @@ export class StorageManager {
 
         console.warn(`⚠️ [Repair Script] Orphaned vendor user found! Email: "${u.email}", User ID: "${u.id}". Repairing...`);
 
-        const rawName = u.name || (u.email ? u.email.split('@')[0] : 'Vendor Store');
-        const baseSlug = rawName
-          .toLowerCase()
-          .trim()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/(^-|-$)+/g, '') || 'vendor-store';
+        const rawName  = u.name || (u.email ? u.email.split('@')[0] : 'Vendor Store');
+        const baseSlug = rawName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') || 'vendor-store';
 
         let uniqueSlug = baseSlug;
-        let counter = 1;
+        let counter    = 1;
         while (existingSlugs.has(uniqueSlug.toLowerCase())) {
           uniqueSlug = `${baseSlug}-${counter}`;
           counter++;
@@ -551,6 +552,7 @@ export class StorageManager {
           address: `${u.area || 'Ikorodu'}, Ikorodu, Lagos State`,
           coverPhotoURL: 'https://images.unsplash.com/photo-1556742049-0a670f4a4591?auto=format&fit=crop&w=1000&q=80',
           logoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+          // Repaired orphans start as pending — admin must review them.
           status: 'pending',
           isLive: false,
           isPremium: false,
@@ -559,19 +561,11 @@ export class StorageManager {
           createdAt: u.created_at || new Date().toISOString(),
           rating: 5.0,
           reviewCount: 0,
-          analytics: {
-            profileViews: 0,
-            whatsappTaps: 0,
-            productViews: 0,
-            dailyViews: [],
-          },
+          analytics: { profileViews: 0, whatsappTaps: 0, productViews: 0, dailyViews: [] },
         };
 
         const row = vendorToRow(newVendorObj);
-        const { data: insertedData, error: insertError } = await supabase
-          .from('vendors')
-          .upsert(row)
-          .select();
+        const { data: insertedData, error: insertError } = await supabase.from('vendors').upsert(row).select();
 
         if (insertError) {
           console.error('❌ [Repair Script] Failed to insert missing vendor into public.vendors:', insertError.message, insertError.details, insertError.code, insertError.hint);
@@ -597,7 +591,8 @@ export class StorageManager {
     }
   }
 
-  // Sync Supabase PostgreSQL data on boot
+  // ── Initial sync & realtime subscriptions ────────────────────────────────
+
   static async initFirestoreSync(onUpdate?: () => void): Promise<void> {
     if (!supabase || !isSupabaseConfigured()) {
       console.log('[Supabase Sync Note]: Supabase URL/Key not configured. Operating with local storage cache.');
@@ -607,12 +602,17 @@ export class StorageManager {
     try {
       await this.repairOrphanedVendorsAsync();
 
-      // 1. Fetch & Sync Vendors
+      // 1. Vendors
       const { data: supaVendors, error: vErr } = await supabase.from('vendors').select('*');
       if (vErr) {
         console.error('Supabase fetch vendors error:', vErr);
       } else if (supaVendors && supaVendors.length > 0) {
-        const fetched = supaVendors.map(rowToVendor);
+        // FIX: respect the deleted-vendor tombstone list when writing from
+        // Supabase so soft-deleted vendors are never re-injected.
+        const deletedIds = getDeletedVendorIds();
+        const fetched = supaVendors
+          .map(rowToVendor)
+          .filter((v: Vendor) => !deletedIds.has(v.id));
         localStorage.setItem(VENDORS_KEY, JSON.stringify(fetched));
         if (onUpdate) onUpdate();
       } else {
@@ -622,12 +622,16 @@ export class StorageManager {
         }
       }
 
-      // 2. Fetch & Sync Products
+      // 2. Products
       const { data: supaProducts, error: pErr } = await supabase.from('products').select('*');
       if (pErr) {
         console.error('Supabase fetch products error:', pErr);
       } else if (supaProducts && supaProducts.length > 0) {
-        const fetched = supaProducts.map(rowToProduct);
+        const deletedProductIds = getDeletedProductIds();
+        const deletedVendorIds  = getDeletedVendorIds();
+        const fetched = supaProducts
+          .map(rowToProduct)
+          .filter((p: Product) => !deletedProductIds.has(p.id) && !deletedVendorIds.has(p.vendorId));
         localStorage.setItem(PRODUCTS_KEY, JSON.stringify(fetched));
         if (onUpdate) onUpdate();
       } else {
@@ -637,33 +641,30 @@ export class StorageManager {
         }
       }
 
-      // 3. Fetch & Sync Reviews
+      // 3. Reviews
       const { data: supaReviews } = await supabase.from('reviews').select('*');
       if (supaReviews && supaReviews.length > 0) {
-        const fetched = supaReviews.map(rowToReview);
-        localStorage.setItem(REVIEWS_KEY, JSON.stringify(fetched));
+        localStorage.setItem(REVIEWS_KEY, JSON.stringify(supaReviews.map(rowToReview)));
       } else {
         for (const r of SEED_REVIEWS) {
           await supabase.from('reviews').upsert(reviewToRow(r));
         }
       }
 
-      // 4. Fetch & Sync Orders
+      // 4. Orders
       const { data: supaOrders } = await supabase.from('orders').select('*');
       if (supaOrders && supaOrders.length > 0) {
-        const fetched = supaOrders.map(rowToOrder);
-        localStorage.setItem(ORDERS_KEY, JSON.stringify(fetched));
+        localStorage.setItem(ORDERS_KEY, JSON.stringify(supaOrders.map(rowToOrder)));
       } else {
         for (const o of SEED_ORDERS) {
           await supabase.from('orders').upsert(orderToRow(o));
         }
       }
 
-      // 5. Fetch & Sync Enquiries
+      // 5. Enquiries
       const { data: supaEnquiries } = await supabase.from('enquiries').select('*');
       if (supaEnquiries && supaEnquiries.length > 0) {
-        const fetched = supaEnquiries.map(rowToEnquiry);
-        localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(fetched));
+        localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(supaEnquiries.map(rowToEnquiry)));
         if (onUpdate) onUpdate();
       } else {
         for (const e of SEED_ENQUIRIES) {
@@ -671,27 +672,49 @@ export class StorageManager {
         }
       }
 
-      // Subscribe to Realtime Table Changes
+      // ── Realtime subscriptions ───────────────────────────────────────────
+      //
+      // FIX: both channels now filter out soft-deleted IDs before writing
+      // to localStorage, so a realtime push can never re-inject a vendor or
+      // product that the admin has explicitly deleted.
+
       supabase
         .channel('public:vendors')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'vendors' }, async () => {
-          const { data } = await supabase.from('vendors').select('*');
-          if (data) {
-            localStorage.setItem(VENDORS_KEY, JSON.stringify(data.map(rowToVendor)));
-            if (onUpdate) onUpdate();
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'vendors' },
+          async () => {
+            const { data } = await supabase.from('vendors').select('*');
+            if (data) {
+              const deletedIds = getDeletedVendorIds();
+              const fresh = data
+                .map(rowToVendor)
+                .filter((v: Vendor) => !deletedIds.has(v.id));
+              localStorage.setItem(VENDORS_KEY, JSON.stringify(fresh));
+              if (onUpdate) onUpdate();
+            }
           }
-        })
+        )
         .subscribe();
 
       supabase
         .channel('public:products')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, async () => {
-          const { data } = await supabase.from('products').select('*');
-          if (data) {
-            localStorage.setItem(PRODUCTS_KEY, JSON.stringify(data.map(rowToProduct)));
-            if (onUpdate) onUpdate();
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'products' },
+          async () => {
+            const { data } = await supabase.from('products').select('*');
+            if (data) {
+              const deletedProductIds = getDeletedProductIds();
+              const deletedVendorIds  = getDeletedVendorIds();
+              const fresh = data
+                .map(rowToProduct)
+                .filter((p: Product) => !deletedProductIds.has(p.id) && !deletedVendorIds.has(p.vendorId));
+              localStorage.setItem(PRODUCTS_KEY, JSON.stringify(fresh));
+              if (onUpdate) onUpdate();
+            }
           }
-        })
+        )
         .subscribe();
 
     } catch (error) {
@@ -699,9 +722,8 @@ export class StorageManager {
     }
   }
 
-  // ── FIXED: getVendors ────────────────────────────────────────────────────
-  // Seed records the admin has explicitly deleted are tracked in
-  // DELETED_VENDOR_IDS_KEY so they are never re-injected on subsequent reads.
+  // ── Vendors ──────────────────────────────────────────────────────────────
+
   static getVendors(): Vendor[] {
     try {
       const data = localStorage.getItem(VENDORS_KEY);
@@ -710,22 +732,18 @@ export class StorageManager {
         return SEED_VENDORS;
       }
 
-      const list: Vendor[] = JSON.parse(data);
-      const existingIds    = new Set(list.map((v) => v.id));
-      const deletedIds     = getDeletedVendorIds();
+      const list: Vendor[]  = JSON.parse(data);
+      const existingIds     = new Set(list.map((v) => v.id));
+      const deletedIds      = getDeletedVendorIds();
 
       let updated = false;
       for (const sv of SEED_VENDORS) {
-        // Only re-inject a seed vendor when it is genuinely missing AND was
-        // never explicitly deleted by the admin.
         if (!existingIds.has(sv.id) && !deletedIds.has(sv.id)) {
           list.push(sv);
           updated = true;
         }
       }
-      if (updated) {
-        localStorage.setItem(VENDORS_KEY, JSON.stringify(list));
-      }
+      if (updated) localStorage.setItem(VENDORS_KEY, JSON.stringify(list));
       return list;
     } catch {
       return SEED_VENDORS;
@@ -737,7 +755,7 @@ export class StorageManager {
   }
 
   static getVendorBySlug(slug: string): Vendor | undefined {
-    const raw = (slug || '').toLowerCase().trim();
+    const raw       = (slug || '').toLowerCase().trim();
     const cleanSlug = raw.replace(/[^a-z0-9]/g, '');
     return this.getVendors().find((v) => {
       const vSlug = v.slug.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -755,6 +773,7 @@ export class StorageManager {
     if (!newVendor.slug) {
       newVendor.slug = await generateUniqueVendorSlug(newVendor.businessName || 'vendor');
     }
+    // Always default new registrations to pending — never approve on insert.
     if (!newVendor.status) newVendor.status = 'pending';
     if (newVendor.isLive === undefined) newVendor.isLive = false;
 
@@ -773,8 +792,13 @@ export class StorageManager {
         }
 
         const row = vendorToRow(newVendor);
-        console.log('[Supabase] Inserting vendor to database table "vendors":', row.id, row.business_name, row.slug);
-        
+        // FIX: explicitly set status and is_live on the row so they are
+        // never overridden by a Supabase column default.
+        row.status  = newVendor.status || 'pending';
+        row.is_live = newVendor.isLive ?? false;
+
+        console.log('[Supabase] Inserting vendor to database table "vendors":', row.id, row.business_name, row.slug, 'status:', row.status);
+
         const { data, error } = await supabase.from('vendors').upsert(row).select();
 
         if (error) {
@@ -794,7 +818,9 @@ export class StorageManager {
 
     const vendors = this.getVendors();
     const existingIndex = vendors.findIndex(
-      (v) => v.id === newVendor.id || (v.email && v.email.toLowerCase() === newVendor.email?.toLowerCase())
+      (v) =>
+        v.id === newVendor.id ||
+        (v.email && v.email.toLowerCase() === newVendor.email?.toLowerCase())
     );
     if (existingIndex !== -1) {
       vendors[existingIndex] = newVendor;
@@ -813,7 +839,7 @@ export class StorageManager {
 
   static async updateVendorAsync(updated: Vendor): Promise<Vendor> {
     const vendors = this.getVendors();
-    const index = vendors.findIndex((v) => v.id === updated.id);
+    const index   = vendors.findIndex((v) => v.id === updated.id);
     if (index !== -1) {
       vendors[index] = updated;
       this.saveVendors(vendors);
@@ -834,27 +860,20 @@ export class StorageManager {
     return updated;
   }
 
-  // ── FIXED: deleteVendorAsync ─────────────────────────────────────────────
-  // Persists the vendor ID (and all its product IDs) into the deleted-IDs
-  // tombstone lists so getVendors() / getProducts() never re-inject them.
   static async deleteVendorAsync(vendorId: string): Promise<void> {
-    // 1. Record the vendor ID as deleted before modifying the list
+    // Tombstone the vendor ID first so getVendors() never re-injects it.
     persistDeletedVendorId(vendorId);
 
-    // 2. Also tombstone every seed product belonging to this vendor
+    // Tombstone every seed product belonging to this vendor too.
     const productsToRemove = this.getProducts().filter((p) => p.vendorId === vendorId);
-    for (const p of productsToRemove) {
-      persistDeletedProductId(p.id);
-    }
+    for (const p of productsToRemove) persistDeletedProductId(p.id);
 
-    // 3. Remove from localStorage
     const vendors = this.getVendors().filter((v) => v.id !== vendorId);
     this.saveVendors(vendors);
 
     const products = this.getProducts().filter((p) => p.vendorId !== vendorId);
     this.saveProducts(products);
 
-    // 4. Remove from Supabase
     if (supabase) {
       try {
         await supabase.from('vendors').delete().eq('id', vendorId);
@@ -869,9 +888,8 @@ export class StorageManager {
     this.deleteVendorAsync(vendorId);
   }
 
-  // ── FIXED: getProducts ───────────────────────────────────────────────────
-  // Respects both the product-level and vendor-level deleted-ID tombstones so
-  // seed products are never re-injected after deletion.
+  // ── Products ─────────────────────────────────────────────────────────────
+
   static getProducts(): Product[] {
     try {
       const data = localStorage.getItem(PRODUCTS_KEY);
@@ -880,15 +898,13 @@ export class StorageManager {
         return SEED_PRODUCTS;
       }
 
-      const list: Product[]      = JSON.parse(data);
-      const existingIds          = new Set(list.map((p) => p.id));
-      const deletedProductIds    = getDeletedProductIds();
-      const deletedVendorIds     = getDeletedVendorIds();
+      const list: Product[]       = JSON.parse(data);
+      const existingIds           = new Set(list.map((p) => p.id));
+      const deletedProductIds     = getDeletedProductIds();
+      const deletedVendorIds      = getDeletedVendorIds();
 
       let updated = false;
       for (const sp of SEED_PRODUCTS) {
-        // Re-inject only if: not already present AND not explicitly deleted
-        // AND its parent vendor was not deleted.
         if (
           !existingIds.has(sp.id) &&
           !deletedProductIds.has(sp.id) &&
@@ -898,9 +914,7 @@ export class StorageManager {
           updated = true;
         }
       }
-      if (updated) {
-        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(list));
-      }
+      if (updated) localStorage.setItem(PRODUCTS_KEY, JSON.stringify(list));
       return list;
     } catch {
       return SEED_PRODUCTS;
@@ -933,7 +947,7 @@ export class StorageManager {
 
   static async updateProductAsync(updated: Product): Promise<Product> {
     const products = this.getProducts();
-    const idx = products.findIndex((p) => p.id === updated.id);
+    const idx      = products.findIndex((p) => p.id === updated.id);
     if (idx !== -1) {
       products[idx] = updated;
       this.saveProducts(products);
@@ -954,8 +968,6 @@ export class StorageManager {
     return updated;
   }
 
-  // ── FIXED: deleteProductAsync ────────────────────────────────────────────
-  // Tombstones the product ID so getProducts() never re-injects it.
   static async deleteProductAsync(productId: string): Promise<void> {
     persistDeletedProductId(productId);
 
@@ -974,6 +986,8 @@ export class StorageManager {
   static deleteProduct(productId: string): void {
     this.deleteProductAsync(productId);
   }
+
+  // ── Reviews ──────────────────────────────────────────────────────────────
 
   static getReviews(): Review[] {
     try {
@@ -1001,12 +1015,12 @@ export class StorageManager {
       }
     }
 
-    // Recalculate rating on vendor
+    // Recalculate vendor rating
     const vendorReviews = reviews.filter((r) => r.vendorId === review.vendorId);
     const avg = vendorReviews.reduce((sum, r) => sum + r.rating, 0) / vendorReviews.length;
     const vendor = this.getVendorById(review.vendorId);
     if (vendor) {
-      vendor.rating = parseFloat(avg.toFixed(1));
+      vendor.rating      = parseFloat(avg.toFixed(1));
       vendor.reviewCount = vendorReviews.length;
       this.updateVendor(vendor);
     }
@@ -1019,6 +1033,8 @@ export class StorageManager {
     return review;
   }
 
+  // ── Enquiries ─────────────────────────────────────────────────────────────
+
   static getEnquiries(vendorIdOrSlug?: string): Enquiry[] {
     try {
       const data = localStorage.getItem(ENQUIRIES_KEY);
@@ -1029,7 +1045,9 @@ export class StorageManager {
       }
       all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       if (vendorIdOrSlug) {
-        const vendor = this.getVendors().find((v) => v.id === vendorIdOrSlug || v.slug === vendorIdOrSlug);
+        const vendor = this.getVendors().find(
+          (v) => v.id === vendorIdOrSlug || v.slug === vendorIdOrSlug
+        );
         const matchIds = new Set(
           [vendorIdOrSlug, vendor?.id, vendor?.slug, vendor?.whatsapp, vendor?.phone].filter(
             (val): val is string => Boolean(val)
@@ -1065,7 +1083,7 @@ export class StorageManager {
 
   static async markEnquiryReadAsync(id: string): Promise<void> {
     const enquiries = this.getEnquiries();
-    const target = enquiries.find((e) => e.id === id);
+    const target    = enquiries.find((e) => e.id === id);
     if (target) {
       target.read = true;
       localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(enquiries));
@@ -1085,11 +1103,11 @@ export class StorageManager {
 
   static async replyEnquiryAsync(id: string, replyText: string): Promise<Enquiry | null> {
     const enquiries = this.getEnquiries();
-    const target = enquiries.find((e) => e.id === id);
+    const target    = enquiries.find((e) => e.id === id);
     if (target) {
-      target.replyText = replyText;
-      target.repliedAt = new Date().toISOString();
-      target.read = true;
+      target.replyText  = replyText;
+      target.repliedAt  = new Date().toISOString();
+      target.read       = true;
       localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(enquiries));
       if (supabase) {
         try {
@@ -1129,6 +1147,8 @@ export class StorageManager {
     this.deleteEnquiryAsync(id);
   }
 
+  // ── Users ─────────────────────────────────────────────────────────────────
+
   static getCurrentUser(): User | null {
     try {
       const data = localStorage.getItem(CURRENT_USER_KEY);
@@ -1157,6 +1177,8 @@ export class StorageManager {
     this.setCurrentUserAsync(user);
   }
 
+  // ── Favourites ─────────────────────────────────────────────────────────────
+
   static getFavorites(): string[] {
     try {
       const data = localStorage.getItem(FAVORITES_KEY);
@@ -1168,15 +1190,14 @@ export class StorageManager {
 
   static toggleFavorite(vendorId: string): string[] {
     const favs = this.getFavorites();
-    const idx = favs.indexOf(vendorId);
-    if (idx === -1) {
-      favs.push(vendorId);
-    } else {
-      favs.splice(idx, 1);
-    }
+    const idx  = favs.indexOf(vendorId);
+    if (idx === -1) favs.push(vendorId);
+    else favs.splice(idx, 1);
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
     return favs;
   }
+
+  // ── Banners ───────────────────────────────────────────────────────────────
 
   static getBanners(): BannerAd[] {
     try {
@@ -1191,6 +1212,12 @@ export class StorageManager {
     }
   }
 
+  static saveBanners(banners: BannerAd[]): void {
+    localStorage.setItem(BANNERS_KEY, JSON.stringify(banners));
+  }
+
+  // ── Orders ────────────────────────────────────────────────────────────────
+
   static getOrders(userId?: string): Order[] {
     try {
       const data = localStorage.getItem(ORDERS_KEY);
@@ -1200,7 +1227,9 @@ export class StorageManager {
       }
       const all: Order[] = JSON.parse(data);
       if (userId) {
-        return all.filter((o) => o.userId === userId || userId.startsWith('user_shopper') || userId.length > 5);
+        return all.filter(
+          (o) => o.userId === userId || userId.startsWith('user_shopper') || userId.length > 5
+        );
       }
       return all;
     } catch {
@@ -1228,41 +1257,38 @@ export class StorageManager {
     return order;
   }
 
+  // ── Addresses ─────────────────────────────────────────────────────────────
+
   static getUserAddresses(user?: User | null): DeliveryAddress[] {
-    if (user?.savedAddresses && user.savedAddresses.length > 0) {
-      return user.savedAddresses;
-    }
+    if (user?.savedAddresses && user.savedAddresses.length > 0) return user.savedAddresses;
     return INITIAL_DELIVERY_ADDRESSES;
   }
 
   static async saveUserAddressesAsync(user: User, addresses: DeliveryAddress[]): Promise<User> {
-    const updatedUser: User = {
-      ...user,
-      savedAddresses: addresses,
-    };
+    const updatedUser: User = { ...user, savedAddresses: addresses };
     this.setCurrentUser(updatedUser);
     return updatedUser;
   }
 
+  // ── Analytics ─────────────────────────────────────────────────────────────
+
   static incrementVendorTap(vendorId: string, type: 'profile' | 'whatsapp' | 'product'): void {
     const vendor = this.getVendorById(vendorId);
     if (!vendor) return;
-    if (type === 'profile') vendor.analytics.profileViews += 1;
-    if (type === 'whatsapp') vendor.analytics.whatsappTaps += 1;
-    if (type === 'product') vendor.analytics.productViews += 1;
+    if (type === 'profile')  vendor.analytics.profileViews  += 1;
+    if (type === 'whatsapp') vendor.analytics.whatsappTaps  += 1;
+    if (type === 'product')  vendor.analytics.productViews  += 1;
     this.updateVendor(vendor);
   }
 
-  // ── ADMIN SETTINGS ───────────────────────────────────────────────────────
+  // ── Admin settings ─────────────────────────────────────────────────────────
 
   static getSettings(): AdminSettings {
     try {
       try {
         localStorage.removeItem('ikorodusquare_settings');
         localStorage.removeItem('ikorodusquare_settings_v1');
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
 
       const data = localStorage.getItem(SETTINGS_KEY);
       if (!data) {
@@ -1272,27 +1298,12 @@ export class StorageManager {
       const settings = JSON.parse(data);
 
       let needsMigration = false;
-      if (!settings.bankName || settings.bankName.includes('Moniepoint')) {
-        settings.bankName = DEFAULT_ADMIN_SETTINGS.bankName;
-        needsMigration = true;
-      }
-      if (!settings.accountName || settings.accountName === 'IkoroduSquare') {
-        settings.accountName = DEFAULT_ADMIN_SETTINGS.accountName;
-        needsMigration = true;
-      }
-      if (!settings.accountNumber || settings.accountNumber === '8123456789') {
-        settings.accountNumber = DEFAULT_ADMIN_SETTINGS.accountNumber;
-        needsMigration = true;
-      }
-      if (!settings.whatsappSupportNumber || settings.whatsappSupportNumber === '2348031234567') {
-        settings.whatsappSupportNumber = DEFAULT_ADMIN_SETTINGS.whatsappSupportNumber;
-        needsMigration = true;
-      }
+      if (!settings.bankName || settings.bankName.includes('Moniepoint')) { settings.bankName = DEFAULT_ADMIN_SETTINGS.bankName; needsMigration = true; }
+      if (!settings.accountName || settings.accountName === 'IkoroduSquare') { settings.accountName = DEFAULT_ADMIN_SETTINGS.accountName; needsMigration = true; }
+      if (!settings.accountNumber || settings.accountNumber === '8123456789') { settings.accountNumber = DEFAULT_ADMIN_SETTINGS.accountNumber; needsMigration = true; }
+      if (!settings.whatsappSupportNumber || settings.whatsappSupportNumber === '2348031234567') { settings.whatsappSupportNumber = DEFAULT_ADMIN_SETTINGS.whatsappSupportNumber; needsMigration = true; }
 
-      if (needsMigration) {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      }
-
+      if (needsMigration) localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
       return settings;
     } catch {
       return DEFAULT_ADMIN_SETTINGS;
@@ -1310,7 +1321,7 @@ export class StorageManager {
     }
   }
 
-  // ── PROMOTION MANAGEMENT & AUTOMATED EXPIRY ──────────────────────────────
+  // ── Promotions ─────────────────────────────────────────────────────────────
 
   static getPromotions(): Promotion[] {
     try {
@@ -1329,48 +1340,30 @@ export class StorageManager {
     localStorage.setItem(PROMOTIONS_KEY, JSON.stringify(promotions));
   }
 
-  static saveBanners(banners: BannerAd[]): void {
-    localStorage.setItem(BANNERS_KEY, JSON.stringify(banners));
-  }
-
   static createPromotionRequest(promo: Promotion): void {
-    const promotions = this.getPromotions();
-    const existingIndex = promotions.findIndex((p) => p.id === promo.id);
-    if (existingIndex >= 0) {
-      promotions[existingIndex] = promo;
-    } else {
-      promotions.unshift(promo);
-    }
+    const promotions      = this.getPromotions();
+    const existingIndex   = promotions.findIndex((p) => p.id === promo.id);
+    if (existingIndex >= 0) promotions[existingIndex] = promo;
+    else promotions.unshift(promo);
     this.savePromotions(promotions);
 
     if (supabase) {
-      try {
-        supabase.from('promotions').upsert(promo);
-      } catch (e) {
-        console.error('Supabase write error (promotion request):', e);
-      }
+      try { supabase.from('promotions').upsert(promo); }
+      catch (e) { console.error('Supabase write error (promotion request):', e); }
     }
   }
 
   static activatePromotion(promo: Promotion): void {
-    const promotions = this.getPromotions();
+    const promotions    = this.getPromotions();
     const existingIndex = promotions.findIndex((p) => p.id === promo.id);
 
     const startDate  = new Date().toISOString();
     const expiryDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString();
 
-    const updatedPromo: Promotion = {
-      ...promo,
-      status: 'active',
-      startDate,
-      expiryDate,
-    };
+    const updatedPromo: Promotion = { ...promo, status: 'active', startDate, expiryDate };
 
-    if (existingIndex >= 0) {
-      promotions[existingIndex] = updatedPromo;
-    } else {
-      promotions.unshift(updatedPromo);
-    }
+    if (existingIndex >= 0) promotions[existingIndex] = updatedPromo;
+    else promotions.unshift(updatedPromo);
 
     this.savePromotions(promotions);
 
@@ -1388,16 +1381,10 @@ export class StorageManager {
       }
     } else if (updatedPromo.promotionType === 'category_top_spot') {
       const v = vendors.find((v) => v.id === updatedPromo.vendorId);
-      if (v) {
-        v.categoryTopSpot = true;
-        this.updateVendor(v);
-      }
+      if (v) { v.categoryTopSpot = true; this.updateVendor(v); }
     } else if (updatedPromo.promotionType === 'featured_product' && updatedPromo.productId) {
       const p = products.find((prod) => prod.id === updatedPromo.productId);
-      if (p) {
-        p.featured = true;
-        this.updateProduct(p);
-      }
+      if (p) { p.featured = true; this.updateProduct(p); }
     } else if (updatedPromo.promotionType === 'homepage_banner') {
       const banners = this.getBanners();
       const existingBanner = banners.find((b) => b.promotionId === updatedPromo.id);
@@ -1420,18 +1407,15 @@ export class StorageManager {
     }
 
     if (supabase) {
-      try {
-        supabase.from('promotions').upsert(updatedPromo);
-      } catch (e) {
-        console.error('Supabase write error (promotion):', e);
-      }
+      try { supabase.from('promotions').upsert(updatedPromo); }
+      catch (e) { console.error('Supabase write error (promotion):', e); }
     }
   }
 
   static checkAndSyncPromotionExpiries(): void {
     const promotions = this.getPromotions();
-    const now = Date.now();
-    let hasChanges = false;
+    const now        = Date.now();
+    let hasChanges   = false;
 
     const vendors  = this.getVendors();
     const products = this.getProducts();
@@ -1442,7 +1426,7 @@ export class StorageManager {
       if (p.status === 'active') {
         const expiryTime = new Date(p.expiryDate).getTime();
         if (now >= expiryTime) {
-          p.status = 'expired';
+          p.status   = 'expired';
           hasChanges = true;
 
           if (p.promotionType === 'sponsored_vendor') {
@@ -1465,10 +1449,7 @@ export class StorageManager {
             );
             if (!hasOtherActive) {
               const v = vendors.find((v) => v.id === p.vendorId);
-              if (v) {
-                v.categoryTopSpot = false;
-                this.updateVendor(v);
-              }
+              if (v) { v.categoryTopSpot = false; this.updateVendor(v); }
             }
           } else if (p.promotionType === 'featured_product' && p.productId) {
             const hasOtherActive = promotions.some(
@@ -1476,10 +1457,7 @@ export class StorageManager {
             );
             if (!hasOtherActive) {
               const prod = products.find((pr) => pr.id === p.productId);
-              if (prod) {
-                prod.featured = false;
-                this.updateProduct(prod);
-              }
+              if (prod) { prod.featured = false; this.updateProduct(prod); }
             }
           } else if (p.promotionType === 'homepage_banner') {
             banners = banners.filter((b) => b.promotionId !== p.id);
@@ -1489,21 +1467,18 @@ export class StorageManager {
       }
     }
 
-    if (hasChanges) {
-      this.savePromotions(promotions);
-    }
+    if (hasChanges) this.savePromotions(promotions);
   }
 
   static updatePromotionStatus(id: string, newStatus: PromotionStatus, extendDays: number = 0): void {
     const promotions = this.getPromotions();
-    const p = promotions.find((item) => item.id === id);
+    const p          = promotions.find((item) => item.id === id);
     if (!p) return;
 
     p.status = newStatus;
     if (extendDays > 0) {
       const currentExpiry = new Date(p.expiryDate).getTime();
-      const newExpiry = new Date(Math.max(currentExpiry, Date.now()) + extendDays * 86400 * 1000).toISOString();
-      p.expiryDate = newExpiry;
+      p.expiryDate = new Date(Math.max(currentExpiry, Date.now()) + extendDays * 86400 * 1000).toISOString();
     }
 
     if (newStatus === 'active') {
@@ -1540,10 +1515,7 @@ export class StorageManager {
         );
         if (!hasOtherActive) {
           const v = vendors.find((v) => v.id === p.vendorId);
-          if (v) {
-            v.categoryTopSpot = false;
-            this.updateVendor(v);
-          }
+          if (v) { v.categoryTopSpot = false; this.updateVendor(v); }
         }
       } else if (p.promotionType === 'featured_product' && p.productId) {
         const hasOtherActive = promotions.some(
@@ -1551,10 +1523,7 @@ export class StorageManager {
         );
         if (!hasOtherActive) {
           const prod = products.find((pr) => pr.id === p.productId);
-          if (prod) {
-            prod.featured = false;
-            this.updateProduct(prod);
-          }
+          if (prod) { prod.featured = false; this.updateProduct(prod); }
         }
       } else if (p.promotionType === 'homepage_banner') {
         banners = banners.filter((b) => b.promotionId !== p.id);
@@ -1565,11 +1534,8 @@ export class StorageManager {
     }
 
     if (supabase) {
-      try {
-        supabase.from('promotions').upsert(p);
-      } catch (e) {
-        console.error('Supabase update status error:', e);
-      }
+      try { supabase.from('promotions').upsert(p); }
+      catch (e) { console.error('Supabase update status error:', e); }
     }
   }
 }
