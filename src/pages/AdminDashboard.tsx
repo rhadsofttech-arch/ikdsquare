@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { StorageManager } from '../data/mockStorage';
 import { ALL_IKORODU_AREAS } from '../data/ikoroduData';
 import { DashboardSkeleton } from '../components/Skeletons';
-import { Vendor } from '../types';
+import { Vendor, Promotion } from '../types';
 import { AdminLoginPage } from './AdminLoginPage';
 import { isAdminEmail, getAdminEmail } from '../lib/admin';
 import { logoutUser } from '../services/supabase';
@@ -46,8 +47,273 @@ import {
   CreditCard,
   Megaphone,
   RefreshCw,
+  Zap,
+  LayoutTemplate,
+  BadgeCheck,
 } from 'lucide-react';
 
+// ── Promotion type config ────────────────────────────────────────────────────
+const PROMO_TYPES = [
+  {
+    id: 'featured_product',
+    label: 'Featured Product',
+    icon: <Zap className="w-4 h-4 text-amber-500" />,
+    description: 'Pin one of the vendor\'s products to the Featured section on the homepage.',
+    price: 5000,
+    color: 'amber',
+  },
+  {
+    id: 'sponsored_vendor',
+    label: 'Sponsored Vendor Slot',
+    icon: <Sparkles className="w-4 h-4 text-purple-500" />,
+    description: 'Highlight the vendor storefront with a Sponsored badge across category listings.',
+    price: 10000,
+    color: 'purple',
+  },
+  {
+    id: 'category_top_spot',
+    label: 'Category Top Spot',
+    icon: <Award className="w-4 h-4 text-blue-500" />,
+    description: 'Pin the vendor to the top of their category filter results.',
+    price: 7500,
+    color: 'blue',
+  },
+  {
+    id: 'homepage_banner',
+    label: 'Homepage Banner Slot',
+    icon: <LayoutTemplate className="w-4 h-4 text-emerald-500" />,
+    description: 'Place a branded banner slide on the homepage carousel for 14 days.',
+    price: 15000,
+    color: 'emerald',
+  },
+] as const;
+
+type PromoTypeId = typeof PROMO_TYPES[number]['id'];
+
+// ── Assign Promo Modal ─────────────────────────────────────────────────────
+interface AssignPromoModalProps {
+  vendor: Vendor;
+  products: ReturnType<typeof useApp>['products'];
+  onClose: () => void;
+  onAssign: (promo: Partial<Promotion>) => void;
+}
+
+const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, onClose, onAssign }) => {
+  const [selectedType, setSelectedType] = useState<PromoTypeId>('featured_product');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [reference, setReference] = useState('');
+  const [bannerTitle, setBannerTitle] = useState(`${vendor.businessName} — Special Offer`);
+  const [bannerSubtitle, setBannerSubtitle] = useState('Top verified vendor in Ikorodu.');
+  const [bannerCta, setBannerCta] = useState('Visit Shop');
+  const [bannerImageURL, setBannerImageURL] = useState(vendor.coverPhotoURL || '');
+
+  const vendorProducts = products.filter((p) => p.vendorId === vendor.id);
+  const promoConfig = PROMO_TYPES.find((t) => t.id === selectedType)!;
+
+  const handleSubmit = () => {
+    const base: Partial<Promotion> = {
+      id: `promo-admin-${Date.now()}`,
+      vendorId: vendor.id,
+      vendorName: vendor.businessName,
+      vendorSlug: vendor.slug,
+      promotionType: selectedType,
+      promotionName: `${promoConfig.label} — ${vendor.businessName}`,
+      amount: promoConfig.price,
+      reference: reference || `ADM-${Date.now()}`,
+      status: 'active',
+      startDate: new Date().toISOString(),
+      expiryDate: new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
+      paymentDate: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      ...(selectedType === 'featured_product' && { productId: selectedProductId }),
+      ...(selectedType === 'homepage_banner' && {
+        bannerData: {
+          title: bannerTitle,
+          subtitle: bannerSubtitle,
+          ctaText: bannerCta,
+          imageURL: bannerImageURL,
+        },
+      }),
+    };
+    onAssign(base);
+    onClose();
+  };
+
+  const colorMap: Record<string, string> = {
+    amber:   'border-amber-400 bg-amber-50 text-amber-900',
+    purple:  'border-purple-400 bg-purple-50 text-purple-900',
+    blue:    'border-blue-400 bg-blue-50 text-blue-900',
+    emerald: 'border-emerald-400 bg-emerald-50 text-emerald-900',
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-lg w-full my-8 shadow-2xl border border-slate-200 flex flex-col max-h-[92vh]">
+        {/* Header */}
+        <div className="flex items-start justify-between p-6 border-b border-slate-100 shrink-0">
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Assign Paid Add-on</span>
+            <h3 className="font-extrabold text-lg text-slate-900 mt-0.5">{vendor.businessName}</h3>
+            <p className="text-xs text-slate-500">Owner: {vendor.ownerName} • {vendor.area}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition cursor-pointer">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto space-y-5">
+          {/* Promo type selector */}
+          <div>
+            <p className="text-xs font-extrabold text-slate-700 mb-2 uppercase tracking-wider">Select Promotion Type</p>
+            <div className="grid grid-cols-1 gap-2">
+              {PROMO_TYPES.map((type) => (
+                <button
+                  key={type.id}
+                  onClick={() => setSelectedType(type.id)}
+                  className={`flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition cursor-pointer ${
+                    selectedType === type.id
+                      ? colorMap[type.color]
+                      : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  <div className="mt-0.5 shrink-0">{type.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-extrabold text-sm">{type.label}</span>
+                      <span className="font-black text-xs shrink-0">
+                        ₦{type.price.toLocaleString()}
+                        <span className="font-semibold text-slate-500">/14d</span>
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{type.description}</p>
+                  </div>
+                  {selectedType === type.id && (
+                    <Check className="w-4 h-4 shrink-0 mt-0.5 text-current" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Featured Product — pick product */}
+          {selectedType === 'featured_product' && (
+            <div>
+              <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                Select Product to Feature <span className="text-rose-500">*</span>
+              </label>
+              {vendorProducts.length === 0 ? (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-semibold">
+                  This vendor has no products listed yet. Ask them to add products first.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {vendorProducts.map((prod) => (
+                    <button
+                      key={prod.id}
+                      onClick={() => setSelectedProductId(prod.id)}
+                      className={`flex items-center gap-3 p-2.5 rounded-xl border-2 text-left transition cursor-pointer ${
+                        selectedProductId === prod.id
+                          ? 'border-amber-400 bg-amber-50'
+                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                      }`}
+                    >
+                      <img src={prod.photoURL} alt={prod.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-xs text-slate-900 truncate">{prod.name}</p>
+                        <p className="text-[11px] text-emerald-700 font-extrabold">₦{prod.price.toLocaleString()}</p>
+                      </div>
+                      {selectedProductId === prod.id && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Homepage Banner — extra fields */}
+          {selectedType === 'homepage_banner' && (
+            <div className="space-y-3">
+              <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Banner Content</p>
+              {[
+                { label: 'Headline', value: bannerTitle, setter: setBannerTitle, placeholder: 'e.g. Ikorodu Tech Hub — Best Gadget Deals' },
+                { label: 'Subtitle', value: bannerSubtitle, setter: setBannerSubtitle, placeholder: 'e.g. Top verified vendor in Ikorodu.' },
+                { label: 'CTA Button Text', value: bannerCta, setter: setBannerCta, placeholder: 'e.g. Visit Shop & Chat' },
+                { label: 'Banner Image URL', value: bannerImageURL, setter: setBannerImageURL, placeholder: 'https://...' },
+              ].map(({ label, value, setter, placeholder }) => (
+                <div key={label}>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>
+                  <input
+                    type="text"
+                    value={value}
+                    onChange={(e) => setter(e.target.value)}
+                    placeholder={placeholder}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                  />
+                </div>
+              ))}
+              {bannerImageURL && (
+                <img src={bannerImageURL} alt="Preview" className="w-full h-28 object-cover rounded-xl border border-slate-200" onError={(e) => (e.currentTarget.style.display = 'none')} />
+              )}
+            </div>
+          )}
+
+          {/* Payment reference */}
+          <div>
+            <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+              Payment Reference <span className="text-slate-400 font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder="e.g. ADM-BANK-20260805"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">Auto-generated if left blank.</p>
+          </div>
+
+          {/* Summary */}
+          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs space-y-2">
+            <p className="font-extrabold text-slate-800 text-sm">Summary</p>
+            <div className="flex justify-between">
+              <span className="text-slate-500 font-semibold">Type</span>
+              <span className="font-bold text-slate-900">{promoConfig.label}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500 font-semibold">Duration</span>
+              <span className="font-bold text-slate-900">14 days</span>
+            </div>
+            <div className="flex justify-between border-t border-slate-200 pt-2 mt-1">
+              <span className="font-extrabold text-slate-800">Value</span>
+              <span className="font-black text-emerald-700">₦{promoConfig.price.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="p-5 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={selectedType === 'featured_product' && vendorProducts.length > 0 && !selectedProductId}
+            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold px-5 py-2.5 rounded-xl text-xs shadow-md transition cursor-pointer flex items-center gap-2"
+          >
+            <Zap className="w-3.5 h-3.5" /> Activate Promotion
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Main AdminDashboard
+// ══════════════════════════════════════════════════════════════════════════════
 export const AdminDashboard: React.FC = () => {
   const {
     vendors,
@@ -69,6 +335,7 @@ export const AdminDashboard: React.FC = () => {
     currentUser,
     promotions,
     updatePromotionStatus,
+    activatePromotion,
     adminSettings,
     updateAdminSettings,
   } = useApp();
@@ -118,17 +385,37 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // ── Vendor detail / delete / reject modal state ───────────────────────────
-  const [selectedVendorForDetails, setSelectedVendorForDetails] = useState<Vendor | null>(null);
-  const [vendorToDelete,           setVendorToDelete]           = useState<Vendor | null>(null);
-  const [rejectReasonModal,        setRejectReasonModal]        = useState<string | null>(null);
-  const [rejectReasonText,         setRejectReasonText]         = useState('');
+  // ── Vendor detail / delete / reject / assign-promo modal state ─────────────
+  const [selectedVendorId,   setSelectedVendorId]   = useState<string | null>(null);
+  const [vendorToDeleteId,   setVendorToDeleteId]   = useState<string | null>(null);
+  const [rejectReasonModal,  setRejectReasonModal]  = useState<string | null>(null);
+  const [rejectReasonText,   setRejectReasonText]   = useState('');
+  const [assignPromoVendorId, setAssignPromoVendorId] = useState<string | null>(null);
+
+  // ── Derive live vendor objects from AppContext so modals/buttons are NEVER stale ──
+  // Instead of caching a snapshot (the old bug), we look up the current object
+  // from the live vendors array every render. Mutations via toggleVendorApproval etc.
+  // update vendors in AppContext which re-renders this component with fresh data.
+  const selectedVendorForDetails = useMemo(
+    () => vendors.find((v) => v.id === selectedVendorId) ?? null,
+    [vendors, selectedVendorId]
+  );
+
+  const vendorToDelete = useMemo(
+    () => vendors.find((v) => v.id === vendorToDeleteId) ?? null,
+    [vendors, vendorToDeleteId]
+  );
+
+  const assignPromoVendor = useMemo(
+    () => vendors.find((v) => v.id === assignPromoVendorId) ?? null,
+    [vendors, assignPromoVendorId]
+  );
 
   // ── Directory search / filter ─────────────────────────────────────────────
   const [searchQuery,  setSearchQuery]  = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'featured' | 'verified'>('all');
 
-  // ── Derived vendor lists — these come from Supabase via AppContext ─────────
+  // ── Derived vendor lists — from Supabase via AppContext ───────────────────
   const pendingVendors  = useMemo(() => vendors.filter((v) => v.status === 'pending'), [vendors]);
   const approvedVendors = useMemo(() => vendors.filter((v) => v.status === 'approved'), [vendors]);
 
@@ -151,18 +438,13 @@ export const AdminDashboard: React.FC = () => {
   }, [vendors, searchQuery, statusFilter]);
 
   // ── Auto-refresh safety net (60s) ─────────────────────────────────────────
-  // Realtime handles instant updates; this is the belt-and-suspenders fallback
-  // in case a realtime event is missed (e.g. tab was backgrounded).
   useEffect(() => {
-    const interval = setInterval(() => {
-      refreshData();
-    }, 60_000);
+    const interval = setInterval(() => { refreshData(); }, 60_000);
     return () => clearInterval(interval);
   }, []);
 
   // ── Guards ────────────────────────────────────────────────────────────────
   if (isLoading) return <DashboardSkeleton />;
-
   if (!currentUser) return <AdminLoginPage />;
 
   if (!isAdminEmail(currentUser.email)) {
@@ -173,9 +455,7 @@ export const AdminDashboard: React.FC = () => {
             <ShieldAlert className="w-8 h-8" />
           </div>
           <div>
-            <span className="bg-rose-100 text-rose-800 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider inline-block mb-2">
-              403 FORBIDDEN
-            </span>
+            <span className="bg-rose-100 text-rose-800 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider inline-block mb-2">403 FORBIDDEN</span>
             <h2 className="font-extrabold text-2xl text-slate-900">Access Restricted</h2>
             <p className="text-xs text-slate-600 mt-2 leading-relaxed">
               Your account (<strong className="text-slate-900">{currentUser.email || 'Unrecognized User'}</strong>) is not
@@ -184,19 +464,11 @@ export const AdminDashboard: React.FC = () => {
             </p>
           </div>
           <div className="pt-2 flex flex-col gap-2.5">
-            <button
-              onClick={() => setCurrentPage('home')}
-              className="w-full bg-slate-950 hover:bg-slate-900 text-white font-bold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer"
-            >
+            <button onClick={() => setCurrentPage('home')} className="w-full bg-slate-950 hover:bg-slate-900 text-white font-bold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer">
               Return to Marketplace Home
             </button>
             <button
-              onClick={async () => {
-                await logoutUser();
-                setCurrentUser(null);
-                StorageManager.setCurrentUser(null);
-                setCurrentPage('admin');
-              }}
+              onClick={async () => { await logoutUser(); setCurrentUser(null); StorageManager.setCurrentUser(null); setCurrentPage('admin'); }}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer"
             >
               Sign In as Administrator
@@ -210,10 +482,7 @@ export const AdminDashboard: React.FC = () => {
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleApprove = async (vendorId: string) => {
     await approveVendor(vendorId);
-    // Update modal if it's open for this vendor
-    if (selectedVendorForDetails?.id === vendorId) {
-      setSelectedVendorForDetails((prev) => prev ? { ...prev, status: 'approved', isLive: true } : null);
-    }
+    // No stale-copy update needed — selectedVendorForDetails derives live from vendors[]
   };
 
   const handleConfirmReject = async () => {
@@ -223,20 +492,26 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
     await rejectVendor(rejectReasonModal, rejectReasonText);
-    if (selectedVendorForDetails?.id === rejectReasonModal) {
-      setSelectedVendorForDetails((prev) => prev ? { ...prev, status: 'rejected', isLive: false } : null);
-    }
     setRejectReasonModal(null);
     setRejectReasonText('');
   };
 
   const handleConfirmDelete = async () => {
-    if (!vendorToDelete) return;
-    await deleteVendor(vendorToDelete.id);
-    if (selectedVendorForDetails?.id === vendorToDelete.id) {
-      setSelectedVendorForDetails(null);
+    if (!vendorToDeleteId) return;
+    await deleteVendor(vendorToDeleteId);
+    if (selectedVendorId === vendorToDeleteId) setSelectedVendorId(null);
+    setVendorToDeleteId(null);
+  };
+
+  // Admin-initiated promotion assignment
+  const handleAssignPromotion = async (promoData: Partial<Promotion>) => {
+    try {
+      await activatePromotion(promoData as Promotion);
+      showToast('success', 'Promotion Activated!', `${promoData.promotionName} is now live for ${promoData.vendorName}.`);
+      await refreshData();
+    } catch (e) {
+      showToast('error', 'Assign Failed', 'Could not activate the promotion. Please try again.');
     }
-    setVendorToDelete(null);
   };
 
   return (
@@ -255,12 +530,10 @@ export const AdminDashboard: React.FC = () => {
             Logged in as: <strong>{currentUser.email}</strong>
           </p>
         </div>
-
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => refreshData()}
             className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
-            title="Refresh vendor list from Supabase"
           >
             <RefreshCw className="w-3.5 h-3.5" /> Refresh Data
           </button>
@@ -289,17 +562,17 @@ export const AdminDashboard: React.FC = () => {
       {/* ── Navigation Tabs ───────────────────────────────────────────────── */}
       <div className="flex border-b border-slate-300 text-xs font-bold gap-2 overflow-x-auto pb-1">
         {[
-          { id: 'approvals', label: `Approval Queue (${pendingVendors.length})`, icon: <Clock className="w-4 h-4" /> },
-          { id: 'featured',  label: `Vendors Directory (${vendors.length})`,     icon: <Store className="w-4 h-4" /> },
-          { id: 'analytics', label: 'Analytics',                                  icon: <TrendingUp className="w-4 h-4" /> },
-          { id: 'products',  label: `Products (${products.length})`,              icon: <Package className="w-4 h-4" /> },
-          { id: 'customers', label: 'Customers',                                  icon: <Users className="w-4 h-4" /> },
-          { id: 'orders',    label: 'Orders',                                     icon: <ShoppingBag className="w-4 h-4" /> },
-          { id: 'categories',label: 'Categories',                                 icon: <Layers className="w-4 h-4" /> },
-          { id: 'areas',     label: 'Coverage Areas',                             icon: <MapPin className="w-4 h-4" /> },
-          { id: 'promotions',label: `Promotions (${promotions?.length || 0})`,   icon: <Sparkles className="w-4 h-4 text-emerald-600" /> },
-          { id: 'settings',  label: 'Settings',                                   icon: <Settings className="w-4 h-4" /> },
-          { id: 'system-logs',label: 'Audit Logs',                                icon: <Activity className="w-4 h-4" /> },
+          { id: 'approvals',   label: `Approval Queue (${pendingVendors.length})`,  icon: <Clock className="w-4 h-4" /> },
+          { id: 'featured',    label: `Vendors Directory (${vendors.length})`,       icon: <Store className="w-4 h-4" /> },
+          { id: 'analytics',   label: 'Analytics',                                   icon: <TrendingUp className="w-4 h-4" /> },
+          { id: 'products',    label: `Products (${products.length})`,               icon: <Package className="w-4 h-4" /> },
+          { id: 'customers',   label: 'Customers',                                   icon: <Users className="w-4 h-4" /> },
+          { id: 'orders',      label: 'Orders',                                      icon: <ShoppingBag className="w-4 h-4" /> },
+          { id: 'categories',  label: 'Categories',                                  icon: <Layers className="w-4 h-4" /> },
+          { id: 'areas',       label: 'Coverage Areas',                              icon: <MapPin className="w-4 h-4" /> },
+          { id: 'promotions',  label: `Promotions (${promotions?.length || 0})`,    icon: <Sparkles className="w-4 h-4 text-emerald-600" /> },
+          { id: 'settings',    label: 'Settings',                                    icon: <Settings className="w-4 h-4" /> },
+          { id: 'system-logs', label: 'Audit Logs',                                  icon: <Activity className="w-4 h-4" /> },
         ].map(({ id, label, icon }) => (
           <button
             key={id}
@@ -317,8 +590,6 @@ export const AdminDashboard: React.FC = () => {
 
       {/* ══════════════════════════════════════════════════════════════════════
           TAB: APPROVAL QUEUE
-          Vendors here come from AppContext.vendors which is fetched directly
-          from Supabase — no localStorage involved.
       ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'approvals' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
@@ -361,19 +632,14 @@ export const AdminDashboard: React.FC = () => {
             <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
               <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
               <h4 className="font-bold text-base text-slate-900">All Applications Processed!</h4>
-              <p className="text-xs text-slate-500">
-                No pending vendor registrations. New registrations appear here automatically.
-              </p>
+              <p className="text-xs text-slate-500">No pending vendor registrations. New registrations appear here automatically.</p>
             </div>
           ) : (
             <div className="space-y-4">
               {pendingVendors.map((vendor) => {
                 const vendorProds = products.filter((p) => p.vendorId === vendor.id);
                 return (
-                  <div
-                    key={vendor.id}
-                    className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 hover:border-slate-300 transition"
-                  >
+                  <div key={vendor.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 hover:border-slate-300 transition">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
                       <div className="flex items-center gap-3">
                         <img
@@ -384,9 +650,7 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="font-extrabold text-base text-slate-900">{vendor.businessName}</h4>
-                            <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
-                              Pending Review
-                            </span>
+                            <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">Pending Review</span>
                           </div>
                           <p className="text-xs text-slate-600">
                             Owner: <strong>{vendor.ownerName}</strong> •
@@ -395,10 +659,9 @@ export const AdminDashboard: React.FC = () => {
                           </p>
                         </div>
                       </div>
-
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
-                          onClick={() => setSelectedVendorForDetails(vendor)}
+                          onClick={() => setSelectedVendorId(vendor.id)}
                           className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-xs transition cursor-pointer"
                         >
                           <Eye className="w-4 h-4 text-amber-400" /> View Full Info
@@ -416,7 +679,7 @@ export const AdminDashboard: React.FC = () => {
                           Reject
                         </button>
                         <button
-                          onClick={() => setVendorToDelete(vendor)}
+                          onClick={() => setVendorToDeleteId(vendor.id)}
                           className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
                           title="Delete Business"
                         >
@@ -424,7 +687,6 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                       </div>
                     </div>
-
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-white p-3 rounded-xl border border-slate-200">
                       <div>
                         <span className="text-slate-500 block text-[10px]">WhatsApp Contact:</span>
@@ -454,9 +716,7 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                       <div>
                         <span className="text-slate-500 block text-[10px]">Date Registered:</span>
-                        <span className="font-medium text-slate-700">
-                          {new Date(vendor.createdAt).toLocaleDateString()}
-                        </span>
+                        <span className="font-medium text-slate-700">{new Date(vendor.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
                   </div>
@@ -474,8 +734,8 @@ export const AdminDashboard: React.FC = () => {
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
-              <h3 className="font-extrabold text-lg text-slate-900">Vendor Directory & Featured Placements</h3>
-              <p className="text-xs text-slate-500">Manage store visibility, homepage spotlights, sponsored slots, or remove businesses.</p>
+              <h3 className="font-extrabold text-lg text-slate-900">Vendor Directory & Paid Add-ons</h3>
+              <p className="text-xs text-slate-500">Manage approvals, verifications, featured placements, and assign promotional add-ons to vendors.</p>
             </div>
             <div className="relative w-full lg:w-72">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -487,10 +747,7 @@ export const AdminDashboard: React.FC = () => {
                 className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-50"
               />
               {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
-                >×</button>
+                <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold">×</button>
               )}
             </div>
           </div>
@@ -525,103 +782,121 @@ export const AdminDashboard: React.FC = () => {
           {/* Vendor list */}
           <div className="divide-y divide-slate-100">
             {filteredVendors.length === 0 ? (
-              <div className="py-12 text-center text-slate-500 text-xs">
-                No vendors found matching search or filter criteria.
-              </div>
+              <div className="py-12 text-center text-slate-500 text-xs">No vendors found matching search or filter criteria.</div>
             ) : (
               filteredVendors.map((vendor) => {
-                const isLive       = vendor.isLive || vendor.status === 'approved';
-                const isVerified   = Boolean(vendor.ninVerified || vendor.nin_verified);
-                const isFeatured   = Boolean(vendor.isFeatured ?? vendor.is_featured ?? vendor.featuredOnHomepage);
+                // These derive from the LIVE vendors array — always current after any mutation
+                const isLive     = vendor.isLive || vendor.status === 'approved';
+                const isVerified = Boolean(vendor.ninVerified || vendor.nin_verified);
+                const isFeatured = Boolean(vendor.isFeatured ?? vendor.is_featured ?? vendor.featuredOnHomepage);
 
                 return (
-                  <div key={vendor.id} className="py-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4 hover:bg-slate-50/50 p-3 rounded-2xl transition border border-slate-100 mb-2 bg-white">
-                    <div className="flex items-center gap-3">
+                  <div key={vendor.id} className="py-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3 hover:bg-slate-50/50 px-3 rounded-2xl transition border border-slate-100 mb-2 bg-white">
+                    <div className="flex items-center gap-3 min-w-0">
                       <img
                         src={vendor.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'}
                         alt={vendor.businessName}
-                        className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
+                        className="w-11 h-11 rounded-xl object-cover border border-slate-200 shrink-0"
                       />
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-extrabold text-sm text-slate-900">{vendor.businessName}</h4>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-extrabold text-sm text-slate-900 truncate">{vendor.businessName}</h4>
                           {isLive ? (
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-emerald-300">Live</span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-300 shrink-0">Live</span>
                           ) : vendor.status === 'rejected' ? (
-                            <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-rose-300">Rejected</span>
+                            <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-300 shrink-0">Rejected</span>
                           ) : (
-                            <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-amber-300">Pending</span>
+                            <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-300 shrink-0">Pending</span>
                           )}
                           {isVerified && (
-                            <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-blue-300 flex items-center gap-1">
+                            <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-blue-300 flex items-center gap-0.5 shrink-0">
                               <ShieldCheck className="w-3 h-3 text-blue-600" /> Verified
                             </span>
                           )}
                           {isFeatured && (
-                            <span className="bg-purple-100 text-purple-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-purple-300 flex items-center gap-1">
+                            <span className="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-purple-300 flex items-center gap-0.5 shrink-0">
                               <Star className="w-3 h-3 text-purple-600 fill-purple-600" /> Featured
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500 mt-1">📍 {vendor.area} • {vendor.subCategory} • {vendor.ownerName}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 truncate">📍 {vendor.area} • {vendor.subCategory} • {vendor.ownerName}</p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                    <div className="flex items-center gap-1.5 text-xs flex-wrap shrink-0">
+                      {/* Approve toggle */}
                       <button
                         onClick={() => toggleVendorApproval(vendor.id)}
-                        className={`px-3 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
                           isLive
                             ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'
                         }`}
+                        title={isLive ? 'Click to unapprove' : 'Click to approve'}
                       >
                         {isLive ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5 text-slate-400" />}
-                        {isLive ? 'Approved' : 'Approve'}
+                        {isLive ? 'Live' : 'Approve'}
                       </button>
 
+                      {/* Verify NIN toggle */}
                       <button
                         onClick={() => toggleVendorVerification(vendor.id)}
-                        className={`px-3 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
                           isVerified
                             ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700'
                         }`}
+                        title={isVerified ? 'Click to remove verification' : 'Click to verify NIN'}
                       >
                         <ShieldCheck className={`w-3.5 h-3.5 ${isVerified ? 'text-white' : 'text-slate-400'}`} />
-                        {isVerified ? 'Verified ✓' : 'Verify NIN'}
+                        {isVerified ? 'Verified' : 'Verify'}
                       </button>
 
+                      {/* Feature toggle */}
                       <button
                         onClick={() => toggleVendorFeatured(vendor.id)}
-                        className={`px-3 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
                           isFeatured
                             ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700'
                         }`}
+                        title={isFeatured ? 'Click to unfeature' : 'Click to feature'}
                       >
                         <Star className={`w-3.5 h-3.5 ${isFeatured ? 'fill-white text-white' : 'text-slate-400'}`} />
-                        {isFeatured ? 'Featured ★' : 'Feature'}
+                        {isFeatured ? 'Featured' : 'Feature'}
                       </button>
 
+                      {/* ── NEW: Assign Paid Add-on ── */}
                       <button
-                        onClick={() => setSelectedVendorForDetails(vendor)}
-                        className="px-3 py-1.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer"
+                        onClick={() => setAssignPromoVendorId(vendor.id)}
+                        className="px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 bg-slate-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400"
+                        title="Assign a paid promotional add-on"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-emerald-600" />
+                        Add-on
+                      </button>
+
+                      {/* View details */}
+                      <button
+                        onClick={() => setSelectedVendorId(vendor.id)}
+                        className="px-2.5 py-1.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5 text-amber-400" /> Info
                       </button>
 
+                      {/* Visit store */}
                       <button
                         onClick={() => navigateToStore(vendor.slug)}
-                        className="p-2 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition cursor-pointer"
+                        className="p-1.5 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition cursor-pointer"
                         title="Visit Storefront"
                       >
                         <ExternalLink className="w-4 h-4" />
                       </button>
 
+                      {/* Delete */}
                       <button
-                        onClick={() => setVendorToDelete(vendor)}
-                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                        onClick={() => setVendorToDeleteId(vendor.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
                         title="Delete Business"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -641,10 +916,10 @@ export const AdminDashboard: React.FC = () => {
       {activeTab === 'analytics' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {[
-            { label: 'Total Vendors',           value: vendors.length,            sub: `${approvedVendors.length} Live Stores`,        color: 'text-slate-900' },
-            { label: 'Total Listed Products',   value: products.length,           sub: 'Indexed in Search',                           color: 'text-emerald-600' },
-            { label: 'Active Monthly Users',    value: '14,850+',                 sub: `Across ${ALL_IKORODU_AREAS.length} Areas`,     color: 'text-slate-900' },
-            { label: 'WhatsApp Enquiries',      value: '24,500+',                 sub: 'Direct Buyer Connections',                    color: 'text-amber-500' },
+            { label: 'Total Vendors',           value: vendors.length,     sub: `${approvedVendors.length} Live Stores`,        color: 'text-slate-900' },
+            { label: 'Total Listed Products',   value: products.length,    sub: 'Indexed in Search',                           color: 'text-emerald-600' },
+            { label: 'Active Monthly Users',    value: '14,850+',          sub: `Across ${ALL_IKORODU_AREAS.length} Areas`,     color: 'text-slate-900' },
+            { label: 'WhatsApp Enquiries',      value: '24,500+',          sub: 'Direct Buyer Connections',                    color: 'text-amber-500' },
           ].map(({ label, value, sub, color }) => (
             <div key={label} className="bg-white p-6 rounded-3xl border border-slate-200 space-y-2 shadow-xs">
               <p className="text-xs font-bold text-slate-500">{label}</p>
@@ -665,9 +940,7 @@ export const AdminDashboard: React.FC = () => {
               <h3 className="font-extrabold text-lg text-slate-900">Platform Product Listings</h3>
               <p className="text-xs text-slate-500">Monitor product quality across all registered stores</p>
             </div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-              {products.length} Active Items
-            </span>
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">{products.length} Active Items</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {products.map((prod) => {
@@ -697,9 +970,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
             <Users className="w-10 h-10 text-slate-400 mx-auto" />
             <h4 className="font-bold text-slate-900 text-sm">Customer Activity Monitoring</h4>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Customer accounts are synced via secure cloud storage. All user details are verified for secure marketplace interaction.
-            </p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">Customer accounts are synced via secure cloud storage. All user details are verified for secure marketplace interaction.</p>
           </div>
         </div>
       )}
@@ -713,9 +984,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
             <ShoppingBag className="w-10 h-10 text-emerald-600 mx-auto" />
             <h4 className="font-bold text-slate-900 text-sm">Direct Vendor Communications</h4>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              IkoroduSquare connects customers directly with vendors via WhatsApp checkout. Over 24,500 direct inquiries logged to date.
-            </p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">IkoroduSquare connects customers directly with vendors via WhatsApp checkout. Over 24,500 direct inquiries logged to date.</p>
           </div>
         </div>
       )}
@@ -729,8 +998,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {['Electronics & Phones','Fashion & Beauty','Food & Groceries','Services & Trades','Real Estate & Rent','Automotive','Health & Pharmacy','Home & Furniture'].map((cat) => (
               <div key={cat} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 font-bold text-xs text-slate-800 flex items-center gap-2">
-                <Tag className="w-4 h-4 text-orange-600 shrink-0" />
-                <span>{cat}</span>
+                <Tag className="w-4 h-4 text-orange-600 shrink-0" /> <span>{cat}</span>
               </div>
             ))}
           </div>
@@ -746,8 +1014,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {['Agric / Isawo','Garage / Sabo','Ebute / Ogolonto','Ikorodu Town / Ita Elewa','Ibeshe / Ipakodo','Imota','Ijede / Egbin','Olayeni / Majidun'].map((area) => (
               <div key={area} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 font-bold text-xs text-slate-800 flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{area}</span>
+                <MapPin className="w-4 h-4 text-emerald-600 shrink-0" /> <span>{area}</span>
               </div>
             ))}
           </div>
@@ -765,17 +1032,14 @@ export const AdminDashboard: React.FC = () => {
               <p className="text-xs text-slate-500">Configure payment details and WhatsApp support for vendor promotions</p>
             </div>
             <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                updateAdminSettings({ bankName, accountName, accountNumber, whatsappSupportNumber });
-              }}
+              onSubmit={(e) => { e.preventDefault(); updateAdminSettings({ bankName, accountName, accountNumber, whatsappSupportNumber }); }}
               className="space-y-4 max-w-xl text-xs"
             >
               {[
-                { label: 'Bank Name',                  value: bankName,              setter: setBankName,              placeholder: 'e.g. FCMB' },
-                { label: 'Account Name',               value: accountName,           setter: setAccountName,           placeholder: 'e.g. Rhadsoft Tech' },
-                { label: 'Account Number',             value: accountNumber,         setter: setAccountNumber,         placeholder: 'e.g. 9474918014' },
-                { label: 'WhatsApp Support Number',    value: whatsappSupportNumber, setter: setWhatsappSupportNumber, placeholder: 'e.g. 08156655091' },
+                { label: 'Bank Name',               value: bankName,              setter: setBankName,              placeholder: 'e.g. FCMB' },
+                { label: 'Account Name',             value: accountName,           setter: setAccountName,           placeholder: 'e.g. Rhadsoft Tech' },
+                { label: 'Account Number',           value: accountNumber,         setter: setAccountNumber,         placeholder: 'e.g. 9474918014' },
+                { label: 'WhatsApp Support Number',  value: whatsappSupportNumber, setter: setWhatsappSupportNumber, placeholder: 'e.g. 08156655091' },
               ].map(({ label, value, setter, placeholder }) => (
                 <div key={label}>
                   <label className="block font-bold text-slate-800 mb-1">{label}</label>
@@ -786,15 +1050,11 @@ export const AdminDashboard: React.FC = () => {
                   />
                 </div>
               ))}
-              <button
-                type="submit"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-6 py-3 rounded-xl transition shadow-md cursor-pointer text-xs"
-              >
+              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-6 py-3 rounded-xl transition shadow-md cursor-pointer text-xs">
                 Save Settings
               </button>
             </form>
           </div>
-
           <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
             <h3 className="font-extrabold text-lg text-slate-900">Platform Security & Access</h3>
             <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
@@ -848,6 +1108,7 @@ export const AdminDashboard: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5" /> Platform Revenue Engine
               </span>
               <h3 className="text-2xl sm:text-3xl font-black">Promotions Management</h3>
+              <p className="text-xs text-slate-400">Manage inbound promotion requests, or assign paid add-ons directly to vendors from the Vendor Directory tab.</p>
             </div>
             <div className="bg-white/10 backdrop-blur-md p-5 rounded-2xl border border-white/15 text-right sm:min-w-[200px]">
               <p className="text-slate-300 font-bold text-xs uppercase tracking-wider">Total Ad Revenue</p>
@@ -856,6 +1117,19 @@ export const AdminDashboard: React.FC = () => {
               </p>
               <p className="text-[10px] text-slate-400 mt-1">{(promotions || []).length} Total Transactions</p>
             </div>
+          </div>
+
+          {/* Promo type legend */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {PROMO_TYPES.map((type) => (
+              <div key={type.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-start gap-3 shadow-xs">
+                {type.icon}
+                <div>
+                  <p className="font-extrabold text-xs text-slate-900">{type.label}</p>
+                  <p className="text-[11px] text-emerald-700 font-black">₦{type.price.toLocaleString()}/14d</p>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-5 shadow-xs">
@@ -889,6 +1163,7 @@ export const AdminDashboard: React.FC = () => {
               <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
                 <Sparkles className="w-8 h-8 text-slate-300 mx-auto" />
                 <p className="font-bold text-sm text-slate-700">No Promotions Recorded</p>
+                <p className="text-xs text-slate-500">Promotions assigned from the Vendor Directory will appear here.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -999,6 +1274,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* ══════════════════════════════════════════════════════════════════════
           FULL VENDOR DETAILS MODAL
+          selectedVendorForDetails is derived live from vendors[] — never stale
       ══════════════════════════════════════════════════════════════════════ */}
       {selectedVendorForDetails && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -1008,10 +1284,8 @@ export const AdminDashboard: React.FC = () => {
                 src={selectedVendorForDetails.coverPhotoURL || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop'}
                 alt="Cover" className="w-full h-full object-cover opacity-60"
               />
-              <button
-                onClick={() => setSelectedVendorForDetails(null)}
-                className="absolute top-3 right-3 bg-slate-950/80 text-white p-2 rounded-full hover:bg-slate-900 transition z-10 cursor-pointer"
-              >
+              <button onClick={() => setSelectedVendorId(null)}
+                className="absolute top-3 right-3 bg-slate-950/80 text-white p-2 rounded-full hover:bg-slate-900 transition z-10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
               <div className="absolute bottom-3 left-4 sm:left-6 flex items-end gap-3 z-10">
@@ -1106,17 +1380,18 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
+            {/* Modal footer — buttons derive live state, never stale */}
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <button
-                onClick={() => { navigateToStore(selectedVendorForDetails.slug); setSelectedVendorForDetails(null); }}
+                onClick={() => { navigateToStore(selectedVendorForDetails.slug); setSelectedVendorId(null); }}
                 className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
               >
                 <ExternalLink className="w-4 h-4" /> Preview Store
               </button>
-
               <div className="flex items-center gap-2 flex-wrap">
+                {/* Approve — reflects live state */}
                 <button
-                  onClick={async () => { await toggleVendorApproval(selectedVendorForDetails.id); }}
+                  onClick={() => toggleVendorApproval(selectedVendorForDetails.id)}
                   className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${
                     selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved'
                       ? 'bg-emerald-600 text-white hover:bg-emerald-700'
@@ -1126,9 +1401,9 @@ export const AdminDashboard: React.FC = () => {
                   <CheckCircle2 className="w-4 h-4" />
                   {selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved' ? 'Approved (Live)' : 'Approve Store'}
                 </button>
-
+                {/* Verify — reflects live state */}
                 <button
-                  onClick={async () => { await toggleVendorVerification(selectedVendorForDetails.id); }}
+                  onClick={() => toggleVendorVerification(selectedVendorForDetails.id)}
                   className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${
                     selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified
                       ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -1138,9 +1413,9 @@ export const AdminDashboard: React.FC = () => {
                   <ShieldCheck className="w-4 h-4" />
                   {selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified ? 'Verified ✓' : 'Verify NIN'}
                 </button>
-
+                {/* Feature — reflects live state */}
                 <button
-                  onClick={async () => { await toggleVendorFeatured(selectedVendorForDetails.id); }}
+                  onClick={() => toggleVendorFeatured(selectedVendorForDetails.id)}
                   className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${
                     selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage
                       ? 'bg-purple-600 text-white hover:bg-purple-700'
@@ -1150,16 +1425,22 @@ export const AdminDashboard: React.FC = () => {
                   <Star className="w-4 h-4" />
                   {selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'Featured ★' : 'Feature Vendor'}
                 </button>
-
+                {/* Assign Promotion from modal */}
                 <button
-                  onClick={() => setVendorToDelete(selectedVendorForDetails)}
+                  onClick={() => { setAssignPromoVendorId(selectedVendorForDetails.id); setSelectedVendorId(null); }}
+                  className="font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
+                >
+                  <Zap className="w-4 h-4 text-emerald-700" /> Assign Add-on
+                </button>
+                {/* Delete */}
+                <button
+                  onClick={() => setVendorToDeleteId(selectedVendorForDetails.id)}
                   className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer"
                 >
                   <Trash2 className="w-4 h-4" /> Delete
                 </button>
-
                 <button
-                  onClick={() => setSelectedVendorForDetails(null)}
+                  onClick={() => setSelectedVendorId(null)}
                   className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition cursor-pointer"
                 >
                   Close
@@ -1168,6 +1449,16 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Assign Promotion Modal ─────────────────────────────────────────── */}
+      {assignPromoVendor && (
+        <AssignPromoModal
+          vendor={assignPromoVendor}
+          products={products}
+          onClose={() => setAssignPromoVendorId(null)}
+          onAssign={handleAssignPromotion}
+        />
       )}
 
       {/* ── Delete Confirmation Modal ─────────────────────────────────────── */}
@@ -1185,12 +1476,8 @@ export const AdminDashboard: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center justify-center gap-3 pt-2">
-              <button onClick={() => setVendorToDelete(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">
-                Cancel
-              </button>
-              <button onClick={handleConfirmDelete}
-                className="bg-rose-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md hover:bg-rose-700 transition cursor-pointer">
+              <button onClick={() => setVendorToDeleteId(null)} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">Cancel</button>
+              <button onClick={handleConfirmDelete} className="bg-rose-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md hover:bg-rose-700 transition cursor-pointer">
                 Yes, Delete Business
               </button>
             </div>
@@ -1211,14 +1498,8 @@ export const AdminDashboard: React.FC = () => {
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
             <div className="flex items-center justify-end gap-2 pt-2">
-              <button onClick={() => { setRejectReasonModal(null); setRejectReasonText(''); }}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">
-                Cancel
-              </button>
-              <button onClick={handleConfirmReject}
-                className="bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md hover:bg-rose-700 cursor-pointer">
-                Send Rejection Notice
-              </button>
+              <button onClick={() => { setRejectReasonModal(null); setRejectReasonText(''); }} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">Cancel</button>
+              <button onClick={handleConfirmReject} className="bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md hover:bg-rose-700 cursor-pointer">Send Rejection Notice</button>
             </div>
           </div>
         </div>
