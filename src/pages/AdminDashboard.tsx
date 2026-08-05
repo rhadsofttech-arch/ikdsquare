@@ -8,353 +8,34 @@ import { AdminLoginPage } from './AdminLoginPage';
 import { isAdminEmail, getAdminEmail } from '../lib/admin';
 import { logoutUser } from '../services/supabase';
 import {
-  ShieldCheck,
-  ShieldAlert,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Users,
-  Store,
-  Package,
-  TrendingUp,
-  MessageCircle,
-  Sparkles,
-  Award,
-  AlertCircle,
-  ExternalLink,
-  Eye,
-  Trash2,
-  MapPin,
-  Phone,
-  Mail,
-  Calendar,
-  Search,
-  Filter,
-  X,
-  Globe,
-  Building,
-  Star,
-  Check,
-  LogOut,
-  Settings,
-  FileText,
-  Layers,
-  ShoppingBag,
-  Tag,
-  HelpCircle,
-  Activity,
-  CreditCard,
-  Megaphone,
-  RefreshCw,
-  Zap,
-  LayoutTemplate,
-  BadgeCheck,
+  ShieldCheck, ShieldAlert, CheckCircle2, Clock, Users, Store,
+  Package, TrendingUp, MessageCircle, Sparkles, Award, AlertCircle,
+  ExternalLink, Eye, Trash2, MapPin, Search, X, Star, LogOut,
+  Settings, Layers, ShoppingBag, Tag, Activity, RefreshCw, Zap,
+  LayoutTemplate, Check,
 } from 'lucide-react';
 
-// ── Promotion type config ────────────────────────────────────────────────────
-const PROMO_TYPES = [
-  {
-    id: 'featured_product',
-    label: 'Featured Product',
-    icon: <Zap className="w-4 h-4 text-amber-500" />,
-    description: 'Pin one of the vendor\'s products to the Featured section on the homepage.',
-    price: 5000,
-    color: 'amber',
-  },
-  {
-    id: 'sponsored_vendor',
-    label: 'Sponsored Vendor Slot',
-    icon: <Sparkles className="w-4 h-4 text-purple-500" />,
-    description: 'Highlight the vendor storefront with a Sponsored badge across category listings.',
-    price: 10000,
-    color: 'purple',
-  },
-  {
-    id: 'category_top_spot',
-    label: 'Category Top Spot',
-    icon: <Award className="w-4 h-4 text-blue-500" />,
-    description: 'Pin the vendor to the top of their category filter results.',
-    price: 7500,
-    color: 'blue',
-  },
-  {
-    id: 'homepage_banner',
-    label: 'Homepage Banner Slot',
-    icon: <LayoutTemplate className="w-4 h-4 text-emerald-500" />,
-    description: 'Place a branded banner slide on the homepage carousel for 14 days.',
-    price: 15000,
-    color: 'emerald',
-  },
-] as const;
-
-type PromoTypeId = typeof PROMO_TYPES[number]['id'];
-
-// ── Assign Promo Modal ─────────────────────────────────────────────────────
-interface AssignPromoModalProps {
-  vendor: Vendor;
-  products: ReturnType<typeof useApp>['products'];
-  initialType?: PromoTypeId;
-  onClose: () => void;
-  onAssign: (promo: Partial<Promotion>) => void;
-}
-
-const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, initialType = 'featured_product', onClose, onAssign }) => {
-  const [selectedType, setSelectedType] = useState<PromoTypeId>(initialType);
-  const [selectedProductId, setSelectedProductId] = useState('');
-  const [reference, setReference] = useState('');
-  const [bannerTitle, setBannerTitle] = useState(`${vendor.businessName} — Special Offer`);
-  const [bannerSubtitle, setBannerSubtitle] = useState('Top verified vendor in Ikorodu.');
-  const [bannerCta, setBannerCta] = useState('Visit Shop');
-  const [bannerImageURL, setBannerImageURL] = useState(vendor.coverPhotoURL || '');
-
-  const vendorProducts = products.filter((p) => p.vendorId === vendor.id);
-  const promoConfig = PROMO_TYPES.find((t) => t.id === selectedType)!;
-
-  const handleSubmit = () => {
-    const selectedProd = vendorProducts.find((p) => p.id === selectedProductId);
-    const base: Partial<Promotion> = {
-      id: `promo-admin-${Date.now()}`,
-      vendorId: vendor.id,
-      vendorName: vendor.businessName,
-      vendorSlug: vendor.slug,
-      promotionType: selectedType,
-      promotionName: `${promoConfig.label} — ${vendor.businessName}`,
-      amount: promoConfig.price,
-      reference: reference || `ADM-${Date.now()}`,
-      status: 'active',
-      startDate: new Date().toISOString(),
-      expiryDate: new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
-      paymentDate: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      ...(selectedType === 'featured_product' && {
-        productId: selectedProductId,
-        productName: selectedProd?.name || '',
-      }),
-      ...(selectedType === 'homepage_banner' && {
-        bannerData: {
-          title: bannerTitle,
-          subtitle: bannerSubtitle,
-          ctaText: bannerCta,
-          imageURL: bannerImageURL,
-        },
-      }),
-    };
-    onAssign(base);
-    onClose();
-  };
-
-  const colorMap: Record<string, string> = {
-    amber:   'border-amber-400 bg-amber-50 text-amber-900',
-    purple:  'border-purple-400 bg-purple-50 text-purple-900',
-    blue:    'border-blue-400 bg-blue-50 text-blue-900',
-    emerald: 'border-emerald-400 bg-emerald-50 text-emerald-900',
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-lg w-full my-8 shadow-2xl border border-slate-200 flex flex-col max-h-[92vh]">
-        {/* Header */}
-        <div className="flex items-start justify-between p-6 border-b border-slate-100 shrink-0">
-          <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Assign Paid Add-on</span>
-            <h3 className="font-extrabold text-lg text-slate-900 mt-0.5">{vendor.businessName}</h3>
-            <p className="text-xs text-slate-500">Owner: {vendor.ownerName} • {vendor.area}</p>
-          </div>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition cursor-pointer">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6 overflow-y-auto space-y-5">
-          {/* Promo type selector */}
-          <div>
-            <p className="text-xs font-extrabold text-slate-700 mb-2 uppercase tracking-wider">Select Promotion Type</p>
-            <div className="grid grid-cols-1 gap-2">
-              {PROMO_TYPES.map((type) => (
-                <button
-                  key={type.id}
-                  onClick={() => setSelectedType(type.id)}
-                  className={`flex items-start gap-3 p-3.5 rounded-2xl border-2 text-left transition cursor-pointer ${
-                    selectedType === type.id
-                      ? colorMap[type.color]
-                      : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
-                  }`}
-                >
-                  <div className="mt-0.5 shrink-0">{type.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-extrabold text-sm">{type.label}</span>
-                      <span className="font-black text-xs shrink-0">
-                        ₦{type.price.toLocaleString()}
-                        <span className="font-semibold text-slate-500">/14d</span>
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{type.description}</p>
-                  </div>
-                  {selectedType === type.id && (
-                    <Check className="w-4 h-4 shrink-0 mt-0.5 text-current" />
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Featured Product — pick product */}
-          {selectedType === 'featured_product' && (
-            <div>
-              <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
-                Select Product to Feature <span className="text-rose-500">*</span>
-              </label>
-              {vendorProducts.length === 0 ? (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-semibold">
-                  This vendor has no products listed yet. Ask them to add products first.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1">
-                  {vendorProducts.map((prod) => (
-                    <button
-                      key={prod.id}
-                      onClick={() => setSelectedProductId(prod.id)}
-                      className={`flex items-center gap-3 p-2.5 rounded-xl border-2 text-left transition cursor-pointer ${
-                        selectedProductId === prod.id
-                          ? 'border-amber-400 bg-amber-50'
-                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                      }`}
-                    >
-                      <img src={prod.photoURL || prod.imageURL} alt={prod.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-xs text-slate-900 truncate">{prod.name}</p>
-                        <p className="text-[11px] text-emerald-700 font-extrabold">₦{prod.price.toLocaleString()}</p>
-                      </div>
-                      {selectedProductId === prod.id && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Homepage Banner — extra fields */}
-          {selectedType === 'homepage_banner' && (
-            <div className="space-y-3">
-              <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Banner Content</p>
-              {[
-                { label: 'Headline', value: bannerTitle, setter: setBannerTitle, placeholder: 'e.g. Ikorodu Tech Hub — Best Gadget Deals' },
-                { label: 'Subtitle', value: bannerSubtitle, setter: setBannerSubtitle, placeholder: 'e.g. Top verified vendor in Ikorodu.' },
-                { label: 'CTA Button Text', value: bannerCta, setter: setBannerCta, placeholder: 'e.g. Visit Shop & Chat' },
-                { label: 'Banner Image URL', value: bannerImageURL, setter: setBannerImageURL, placeholder: 'https://...' },
-              ].map(({ label, value, setter, placeholder }) => (
-                <div key={label}>
-                  <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>
-                  <input
-                    type="text"
-                    value={value}
-                    onChange={(e) => setter(e.target.value)}
-                    placeholder={placeholder}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
-                  />
-                </div>
-              ))}
-              {bannerImageURL && (
-                <img src={bannerImageURL} alt="Preview" className="w-full h-28 object-cover rounded-xl border border-slate-200" onError={(e) => (e.currentTarget.style.display = 'none')} />
-              )}
-            </div>
-          )}
-
-          {/* Payment reference */}
-          <div>
-            <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
-              Payment Reference <span className="text-slate-400 font-normal">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder="e.g. ADM-BANK-20260805"
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
-            />
-            <p className="text-[11px] text-slate-400 mt-1">Auto-generated if left blank.</p>
-          </div>
-
-          {/* Summary */}
-          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs space-y-2">
-            <p className="font-extrabold text-slate-800 text-sm">Summary</p>
-            <div className="flex justify-between">
-              <span className="text-slate-500 font-semibold">Type</span>
-              <span className="font-bold text-slate-900">{promoConfig.label}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500 font-semibold">Duration</span>
-              <span className="font-bold text-slate-900">14 days</span>
-            </div>
-            <div className="flex justify-between border-t border-slate-200 pt-2 mt-1">
-              <span className="font-extrabold text-slate-800">Value</span>
-              <span className="font-black text-emerald-700">₦{promoConfig.price.toLocaleString()}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer actions */}
-        <div className="p-5 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={selectedType === 'featured_product' && vendorProducts.length > 0 && !selectedProductId}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold px-5 py-2.5 rounded-xl text-xs shadow-md transition cursor-pointer flex items-center gap-2"
-          >
-            <Zap className="w-3.5 h-3.5" /> Activate Promotion
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // ══════════════════════════════════════════════════════════════════════════════
-// Main AdminDashboard
+// AdminDashboard
 // ══════════════════════════════════════════════════════════════════════════════
 export const AdminDashboard: React.FC = () => {
   const {
-    vendors,
-    products,
-    approveVendor,
-    unapproveVendor,
-    toggleVendorApproval,
-    toggleVendorVerification,
-    toggleVendorFeatured,
-    rejectVendor,
-    deleteVendor,
-    refreshData,
-    showToast,
-    navigateToStore,
-    setCurrentPage,
-    setCurrentUser,
-    setIsAdminMode,
-    isLoading,
-    currentUser,
-    promotions,
-    updatePromotionStatus,
-    activatePromotion,
-    adminSettings,
-    updateAdminSettings,
+    vendors, products,
+    approveVendor, unapproveVendor,
+    toggleVendorApproval, toggleVendorVerification, toggleVendorFeatured,
+    rejectVendor, deleteVendor,
+    refreshData, showToast, navigateToStore,
+    setCurrentPage, setCurrentUser, setIsAdminMode,
+    isLoading, currentUser,
+    promotions, updatePromotionStatus, activatePromotion,
+    adminSettings, updateAdminSettings,
   } = useApp();
 
-  // ALL HOOKS DECLARED UNCONDITIONALLY AT THE TOP LEVEL BEFORE ANY EARLY RETURN
-
-  // ── Promotion management state ────────────────────────────────────────────
-  const [promoSearchQuery,  setPromoSearchQuery]  = useState('');
-  const [promoStatusFilter, setPromoStatusFilter] = useState<'all' | 'pending_verification' | 'active' | 'expired' | 'rejected'>('all');
-
-  // ── Settings form state ───────────────────────────────────────────────────
-  const [bankName,               setBankName]               = useState(adminSettings?.bankName || 'FCMB');
-  const [accountName,            setAccountName]            = useState(adminSettings?.accountName || 'Rhadsoft Tech');
-  const [accountNumber,          setAccountNumber]          = useState(adminSettings?.accountNumber || '9474918014');
-  const [whatsappSupportNumber,  setWhatsappSupportNumber]  = useState(adminSettings?.whatsappSupportNumber || '08156655091');
+  // ── Settings form ─────────────────────────────────────────────────────────
+  const [bankName,              setBankName]              = useState(adminSettings?.bankName || 'FCMB');
+  const [accountName,           setAccountName]           = useState(adminSettings?.accountName || 'Rhadsoft Tech');
+  const [accountNumber,         setAccountNumber]         = useState(adminSettings?.accountNumber || '9474918014');
+  const [whatsappSupportNumber, setWhatsappSupportNumber] = useState(adminSettings?.whatsappSupportNumber || '08156655091');
 
   useEffect(() => {
     if (adminSettings) {
@@ -369,76 +50,59 @@ export const AdminDashboard: React.FC = () => {
   const getInitialAdminTab = (): string => {
     if (typeof window === 'undefined') return 'approvals';
     const path = window.location.pathname.toLowerCase();
-    if (path.includes('/vendors'))       return 'featured';
-    if (path.includes('/analytics'))     return 'analytics';
-    if (path.includes('/products'))      return 'products';
-    if (path.includes('/customers'))     return 'customers';
-    if (path.includes('/orders'))        return 'orders';
-    if (path.includes('/categories'))    return 'categories';
-    if (path.includes('/areas'))         return 'areas';
-    if (path.includes('/promotions'))    return 'promotions';
-    if (path.includes('/settings'))      return 'settings';
-    if (path.includes('/system-logs'))   return 'system-logs';
+    if (path.includes('/vendors'))     return 'featured';
+    if (path.includes('/analytics'))   return 'analytics';
+    if (path.includes('/products'))    return 'products';
+    if (path.includes('/customers'))   return 'customers';
+    if (path.includes('/orders'))      return 'orders';
+    if (path.includes('/categories'))  return 'categories';
+    if (path.includes('/areas'))       return 'areas';
+    if (path.includes('/promotions'))  return 'promotions';
+    if (path.includes('/settings'))    return 'settings';
+    if (path.includes('/system-logs')) return 'system-logs';
     return 'approvals';
   };
 
   const [activeTab, setActiveTabState] = useState<string>(getInitialAdminTab());
-
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
-    if (typeof window !== 'undefined') {
-      window.history.pushState({}, '', `/admin/${tab}`);
-    }
+    if (typeof window !== 'undefined') window.history.pushState({}, '', `/admin/${tab}`);
   };
 
-  // ── Vendor detail / delete / reject / assign-promo modal state ─────────────
-  const [selectedVendorId,    setSelectedVendorId]    = useState<string | null>(null);
-  const [vendorToDeleteId,    setVendorToDeleteId]    = useState<string | null>(null);
-  const [rejectReasonModal,   setRejectReasonModal]   = useState<string | null>(null);
-  const [rejectReasonText,    setRejectReasonText]    = useState('');
-  const [assignPromoVendorId, setAssignPromoVendorId] = useState<string | null>(null);
-  const [assignPromoInitialType, setAssignPromoInitialType] = useState<PromoTypeId>('featured_product');
+  // ── Modal state ───────────────────────────────────────────────────────────
+  const [selectedVendorId,  setSelectedVendorId]  = useState<string | null>(null);
+  const [vendorToDeleteId,  setVendorToDeleteId]  = useState<string | null>(null);
+  const [rejectReasonModal, setRejectReasonModal] = useState<string | null>(null);
+  const [rejectReasonText,  setRejectReasonText]  = useState('');
+  const [promoSearchQuery,  setPromoSearchQuery]  = useState('');
+  const [promoStatusFilter, setPromoStatusFilter] = useState<'all' | 'pending_verification' | 'active' | 'expired' | 'rejected'>('all');
+  const [searchQuery,       setSearchQuery]       = useState('');
+  const [statusFilter,      setStatusFilter]      = useState<'all' | 'pending' | 'approved' | 'rejected' | 'featured' | 'verified'>('all');
 
-  const handleOpenAssignPromo = (vendorId: string, promoType: PromoTypeId) => {
-    setAssignPromoVendorId(vendorId);
-    setAssignPromoInitialType(promoType);
-  };
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const pendingVendors  = useMemo(() => vendors.filter((v) => v.status === 'pending'), [vendors]);
+  const approvedVendors = useMemo(() => vendors.filter((v) => v.status === 'approved'), [vendors]);
 
-  // Active promo map per vendor
-  const vendorActivePromos = useMemo(() => {
-    const activeMap: Record<string, Set<string>> = {};
-    for (const p of promotions || []) {
-      if (p.status === 'active' && p.vendorId) {
-        if (!activeMap[p.vendorId]) activeMap[p.vendorId] = new Set();
-        activeMap[p.vendorId].add(p.promotionType);
-      }
-    }
-    return activeMap;
-  }, [promotions]);
-
-  // ── Derive live vendor objects from AppContext so modals/buttons are NEVER stale ──
   const selectedVendorForDetails = useMemo(
     () => vendors.find((v) => v.id === selectedVendorId) ?? null,
     [vendors, selectedVendorId]
   );
-
   const vendorToDelete = useMemo(
     () => vendors.find((v) => v.id === vendorToDeleteId) ?? null,
     [vendors, vendorToDeleteId]
   );
 
-  const assignPromoVendor = useMemo(
-    () => vendors.find((v) => v.id === assignPromoVendorId) ?? null,
-    [vendors, assignPromoVendorId]
-  );
-
-  // ── Directory search / filter ─────────────────────────────────────────────
-  const [searchQuery,  setSearchQuery]  = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'featured' | 'verified'>('all');
-
-  // ── Derived vendor lists — from Supabase via AppContext ───────────────────
-  const pendingVendors  = useMemo(() => vendors.filter((v) => v.status === 'pending'), [vendors]);
-  const approvedVendors = useMemo(() => vendors.filter((v) => v.status === 'approved'), [vendors]);
+  // Active promo types per vendor
+  const vendorActivePromos = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const p of promotions || []) {
+      if (p.status === 'active' && p.vendorId) {
+        if (!map[p.vendorId]) map[p.vendorId] = new Set();
+        map[p.vendorId].add(p.promotionType);
+      }
+    }
+    return map;
+  }, [promotions]);
 
   const filteredVendors = useMemo(() => {
     return vendors.filter((v) => {
@@ -447,7 +111,6 @@ export const AdminDashboard: React.FC = () => {
         v.ownerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         v.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
         v.area.toLowerCase().includes(searchQuery.toLowerCase());
-
       if (!matchesSearch) return false;
       if (statusFilter === 'pending')  return v.status === 'pending' || !v.isLive;
       if (statusFilter === 'approved') return v.status === 'approved' || v.isLive;
@@ -458,13 +121,11 @@ export const AdminDashboard: React.FC = () => {
     });
   }, [vendors, searchQuery, statusFilter]);
 
-  // ── Auto-refresh safety net (60s) ─────────────────────────────────────────
+  // ── Auto-refresh (60s) ────────────────────────────────────────────────────
   useEffect(() => {
-    const interval = setInterval(() => { refreshData(); }, 60_000);
+    const interval = setInterval(() => refreshData(), 60_000);
     return () => clearInterval(interval);
   }, []);
-
-  // ── ALL HOOKS COMPLETED ABOVE THIS LINE — EARLY RETURNS SAFELY BELOW ─────
 
   // ── Guards ────────────────────────────────────────────────────────────────
   if (isLoading) return <DashboardSkeleton />;
@@ -473,7 +134,7 @@ export const AdminDashboard: React.FC = () => {
   if (!isAdminEmail(currentUser.email)) {
     return (
       <div className="min-h-[85vh] bg-slate-900 flex items-center justify-center p-4 py-12">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-slate-200 space-y-5 animate-fade-in">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-slate-200 space-y-5">
           <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto border border-rose-200">
             <ShieldAlert className="w-8 h-8" />
           </div>
@@ -482,20 +143,15 @@ export const AdminDashboard: React.FC = () => {
             <h2 className="font-extrabold text-2xl text-slate-900">Access Restricted</h2>
             <p className="text-xs text-slate-600 mt-2 leading-relaxed">
               Your account (<strong className="text-slate-900">{currentUser.email || 'Unrecognized User'}</strong>) is not
-              authorized. Access is strictly limited to{' '}
-              <strong className="text-orange-600 underline">{getAdminEmail()}</strong>.
+              authorized. Access is strictly limited to <strong className="text-orange-600 underline">{getAdminEmail()}</strong>.
             </p>
           </div>
           <div className="pt-2 flex flex-col gap-2.5">
-            <button onClick={() => setCurrentPage('home')} className="w-full bg-slate-950 hover:bg-slate-900 text-white font-bold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer">
-              Return to Marketplace Home
-            </button>
+            <button onClick={() => setCurrentPage('home')} className="w-full bg-slate-950 hover:bg-slate-900 text-white font-bold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer">Return to Marketplace Home</button>
             <button
               onClick={async () => { await logoutUser(); setCurrentUser(null); StorageManager.setCurrentUser(null); setCurrentPage('admin'); }}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer"
-            >
-              Sign In as Administrator
-            </button>
+            >Sign In as Administrator</button>
           </div>
         </div>
       </div>
@@ -503,13 +159,8 @@ export const AdminDashboard: React.FC = () => {
   }
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleApprove = async (vendorId: string) => {
-    await approveVendor(vendorId);
-  };
-
   const handleConfirmReject = async () => {
-    if (!rejectReasonModal) return;
-    if (!rejectReasonText.trim()) {
+    if (!rejectReasonModal || !rejectReasonText.trim()) {
       showToast('error', 'Reason Required', 'Please provide a reason for rejecting the application.');
       return;
     }
@@ -525,18 +176,6 @@ export const AdminDashboard: React.FC = () => {
     setVendorToDeleteId(null);
   };
 
-  // Admin-initiated promotion assignment
-  const handleAssignPromotion = async (promoData: Partial<Promotion>) => {
-    try {
-      await activatePromotion(promoData as Promotion);
-      showToast('success', 'Promotion Activated!', `${promoData.promotionName} is now live for ${promoData.vendorName}.`);
-      await refreshData();
-    } catch (e) {
-      showToast('error', 'Assign Failed', 'Could not activate the promotion. Please try again.');
-    }
-  };
-
-  // Delete product action for admin
   const handleDeleteProductAdmin = async (productId: string) => {
     if (!confirm('Are you sure you want to remove this product from the platform?')) return;
     await StorageManager.deleteProductAsync(productId);
@@ -544,44 +183,88 @@ export const AdminDashboard: React.FC = () => {
     showToast('info', 'Product Removed', 'The item has been deleted from the marketplace catalogue.');
   };
 
+  // ── Direct promo activate — no modal, fires immediately ──────────────────
+  const handleDirectActivatePromo = async (vendor: Vendor, promoType: string) => {
+    const PROMO_PRICES: Record<string, number> = {
+      featured_product: 5000,
+      sponsored_vendor: 10000,
+      category_top_spot: 7500,
+      homepage_banner: 15000,
+    };
+    const PROMO_LABELS: Record<string, string> = {
+      featured_product:  'Featured Product',
+      sponsored_vendor:  'Sponsored Vendor Slot',
+      category_top_spot: 'Category Top Spot',
+      homepage_banner:   'Homepage Banner Slot',
+    };
+
+    const activeTypes = vendorActivePromos[vendor.id] || new Set();
+
+    // If already active — deactivate it
+    if (activeTypes.has(promoType)) {
+      const existing = (promotions || []).find(
+        (p) => p.vendorId === vendor.id && p.promotionType === promoType && p.status === 'active'
+      );
+      if (existing) {
+        await updatePromotionStatus(existing.id, 'expired');
+        showToast('info', 'Promotion Deactivated', `${PROMO_LABELS[promoType]} removed for ${vendor.businessName}.`);
+      }
+      return;
+    }
+
+    // Activate immediately
+    const promo: Promotion = {
+      id: `promo-admin-${Date.now()}`,
+      vendorId: vendor.id,
+      vendorName: vendor.businessName,
+      vendorSlug: vendor.slug,
+      promotionType: promoType as any,
+      promotionName: `${PROMO_LABELS[promoType]} — ${vendor.businessName}`,
+      amount: PROMO_PRICES[promoType] || 0,
+      reference: `ADM-${Date.now()}`,
+      status: 'active',
+      startDate: new Date().toISOString(),
+      expiryDate: new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
+      paymentDate: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      ...(promoType === 'homepage_banner' && {
+        bannerData: {
+          title: `${vendor.businessName} — Special Offer`,
+          subtitle: 'Top verified vendor in Ikorodu.',
+          ctaText: 'Visit Shop',
+          imageURL: vendor.coverPhotoURL || vendor.logoURL || '',
+        },
+      }),
+    };
+
+    try {
+      await activatePromotion(promo);
+      showToast('success', 'Promotion Activated!', `${PROMO_LABELS[promoType]} is now live for ${vendor.businessName}.`);
+    } catch (e) {
+      showToast('error', 'Activation Failed', 'Could not activate the promotion. Please try again.');
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-100 py-8 px-4 sm:px-6 lg:px-8 space-y-8 max-w-7xl mx-auto">
 
-      {/* ── Header Banner ──────────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-slate-950 p-6 rounded-3xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="bg-slate-950 text-amber-300 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full">
-              ADMINISTRATOR CONTROL CONSOLE
-            </span>
-          </div>
+          <span className="bg-slate-950 text-amber-300 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full">ADMINISTRATOR CONTROL CONSOLE</span>
           <h1 className="text-2xl font-black mt-1 text-slate-950">IkoroduSquare Admin Dashboard</h1>
-          <p className="text-xs text-amber-950/80 font-medium mt-0.5">
-            Logged in as: <strong>{currentUser.email}</strong>
-          </p>
+          <p className="text-xs text-amber-950/80 font-medium mt-0.5">Logged in as: <strong>{currentUser.email}</strong></p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => refreshData()}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
-          >
+          <button onClick={() => refreshData()} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh Data
           </button>
-          <button
-            onClick={() => { setIsAdminMode(false); setCurrentPage('home'); }}
-            className="bg-slate-950 hover:bg-slate-900 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
-          >
+          <button onClick={() => { setIsAdminMode(false); setCurrentPage('home'); }} className="bg-slate-950 hover:bg-slate-900 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer">
             ← Exit to Marketplace
           </button>
           <button
-            onClick={async () => {
-              await logoutUser();
-              setCurrentUser(null);
-              StorageManager.setCurrentUser(null);
-              setIsAdminMode(false);
-              showToast('info', 'Signed Out', 'You have been signed out of the Administrator console.');
-              setCurrentPage('admin');
-            }}
+            onClick={async () => { await logoutUser(); setCurrentUser(null); StorageManager.setCurrentUser(null); setIsAdminMode(false); showToast('info', 'Signed Out', 'You have been signed out.'); setCurrentPage('admin'); }}
             className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" /> Sign Out
@@ -589,28 +272,25 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Navigation Tabs ───────────────────────────────────────────────── */}
+      {/* Nav Tabs */}
       <div className="flex border-b border-slate-300 text-xs font-bold gap-2 overflow-x-auto pb-1">
         {[
-          { id: 'approvals',   label: `Approval Queue (${pendingVendors.length})`,  icon: <Clock className="w-4 h-4" /> },
-          { id: 'featured',    label: `Vendors Directory (${vendors.length})`,       icon: <Store className="w-4 h-4" /> },
-          { id: 'analytics',   label: 'Analytics',                                   icon: <TrendingUp className="w-4 h-4" /> },
-          { id: 'products',    label: `Products (${products.length})`,               icon: <Package className="w-4 h-4" /> },
-          { id: 'customers',   label: 'Customers',                                   icon: <Users className="w-4 h-4" /> },
-          { id: 'orders',      label: 'Orders',                                      icon: <ShoppingBag className="w-4 h-4" /> },
-          { id: 'categories',  label: 'Categories',                                  icon: <Layers className="w-4 h-4" /> },
-          { id: 'areas',       label: 'Coverage Areas',                              icon: <MapPin className="w-4 h-4" /> },
-          { id: 'promotions',  label: `Promotions (${promotions?.length || 0})`,    icon: <Sparkles className="w-4 h-4 text-emerald-600" /> },
-          { id: 'settings',    label: 'Settings',                                    icon: <Settings className="w-4 h-4" /> },
-          { id: 'system-logs', label: 'Audit Logs',                                  icon: <Activity className="w-4 h-4" /> },
+          { id: 'approvals',   label: `Approval Queue (${pendingVendors.length})`, icon: <Clock className="w-4 h-4" /> },
+          { id: 'featured',    label: `Vendors (${vendors.length})`,               icon: <Store className="w-4 h-4" /> },
+          { id: 'analytics',   label: 'Analytics',                                  icon: <TrendingUp className="w-4 h-4" /> },
+          { id: 'products',    label: `Products (${products.length})`,              icon: <Package className="w-4 h-4" /> },
+          { id: 'customers',   label: 'Customers',                                  icon: <Users className="w-4 h-4" /> },
+          { id: 'orders',      label: 'Orders',                                     icon: <ShoppingBag className="w-4 h-4" /> },
+          { id: 'categories',  label: 'Categories',                                 icon: <Layers className="w-4 h-4" /> },
+          { id: 'areas',       label: 'Coverage Areas',                             icon: <MapPin className="w-4 h-4" /> },
+          { id: 'promotions',  label: `Promotions (${promotions?.length || 0})`,   icon: <Sparkles className="w-4 h-4 text-emerald-600" /> },
+          { id: 'settings',    label: 'Settings',                                   icon: <Settings className="w-4 h-4" /> },
+          { id: 'system-logs', label: 'Audit Logs',                                 icon: <Activity className="w-4 h-4" /> },
         ].map(({ id, label, icon }) => (
           <button
-            key={id}
-            onClick={() => setActiveTab(id)}
+            key={id} onClick={() => setActiveTab(id)}
             className={`pb-3 px-3 transition flex items-center gap-1.5 border-b-2 whitespace-nowrap cursor-pointer ${
-              activeTab === id || (id === 'approvals' && activeTab === 'dashboard')
-                ? 'border-amber-600 text-amber-700 font-black'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === id ? 'border-amber-600 text-amber-700 font-black' : 'border-transparent text-slate-600 hover:text-slate-900'
             }`}
           >
             {icon} {label}
@@ -618,42 +298,30 @@ export const AdminDashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: APPROVAL QUEUE
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: APPROVAL QUEUE ══ */}
       {activeTab === 'approvals' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-extrabold text-lg text-slate-900">Pending Vendor Registrations</h3>
-              <p className="text-xs text-slate-500">
-                Inspect registered business details before approving or rejecting.
-                This list updates in real-time when vendors register.
-              </p>
+              <p className="text-xs text-slate-500">Inspect registered business details before approving or rejecting.</p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => refreshData()}
-                className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              >
+              <button onClick={() => refreshData()} className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer">
                 <RefreshCw className="w-3.5 h-3.5" /> Refresh Queue
               </button>
               <button
                 onClick={async () => {
                   const repaired = await StorageManager.repairOrphanedVendorsAsync();
                   refreshData();
-                  if (repaired > 0) {
-                    showToast('success', 'Repair Complete', `Restored ${repaired} missing vendor record(s).`);
-                  } else {
-                    showToast('info', 'Database OK', 'All vendor users already have store records.');
-                  }
+                  showToast(repaired > 0 ? 'success' : 'info', repaired > 0 ? 'Repair Complete' : 'Database OK', repaired > 0 ? `Restored ${repaired} missing vendor record(s).` : 'All vendor users already have store records.');
                 }}
-                className="text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                className="text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-slate-500" /> Scan & Repair Vendors
+                <RefreshCw className="w-3.5 h-3.5 text-slate-500" /> Scan & Repair
               </button>
               <span className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                {pendingVendors.length} Application{pendingVendors.length !== 1 ? 's' : ''} Awaiting Review
+                {pendingVendors.length} Awaiting Review
               </span>
             </div>
           </div>
@@ -662,123 +330,76 @@ export const AdminDashboard: React.FC = () => {
             <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
               <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
               <h4 className="font-bold text-base text-slate-900">All Applications Processed!</h4>
-              <p className="text-xs text-slate-500">No pending vendor registrations. New registrations appear here automatically.</p>
+              <p className="text-xs text-slate-500">No pending vendor registrations.</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {pendingVendors.map((vendor) => {
-                const vendorProds = products.filter((p) => p.vendorId === vendor.id);
-                return (
-                  <div key={vendor.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 hover:border-slate-300 transition">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={vendor.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'}
-                          alt={vendor.businessName}
-                          className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
-                        />
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="font-extrabold text-base text-slate-900">{vendor.businessName}</h4>
-                            <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">Pending Review</span>
-                          </div>
-                          <p className="text-xs text-slate-600">
-                            Owner: <strong>{vendor.ownerName}</strong> •
-                            Category: <strong>{vendor.subCategory}</strong> •
-                            Area: <strong>{vendor.area}</strong>
-                          </p>
+              {pendingVendors.map((vendor) => (
+                <div key={vendor.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 hover:border-slate-300 transition">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div className="flex items-center gap-3">
+                      <img src={vendor.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'} alt={vendor.businessName} className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0" />
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-extrabold text-base text-slate-900">{vendor.businessName}</h4>
+                          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">Pending Review</span>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          onClick={() => setSelectedVendorId(vendor.id)}
-                          className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-xs transition cursor-pointer"
-                        >
-                          <Eye className="w-4 h-4 text-amber-400" /> View Full Info
-                        </button>
-                        <button
-                          onClick={() => handleApprove(vendor.id)}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 shadow-xs transition cursor-pointer"
-                        >
-                          <CheckCircle2 className="w-4 h-4" /> Approve & Launch
-                        </button>
-                        <button
-                          onClick={() => setRejectReasonModal(vendor.id)}
-                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs px-3 py-2 rounded-xl transition cursor-pointer"
-                        >
-                          Reject
-                        </button>
-                        <button
-                          onClick={() => setVendorToDeleteId(vendor.id)}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
-                          title="Delete Business"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <p className="text-xs text-slate-600">Owner: <strong>{vendor.ownerName}</strong> • <strong>{vendor.subCategory}</strong> • <strong>{vendor.area}</strong></p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-white p-3 rounded-xl border border-slate-200">
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">WhatsApp Contact:</span>
-                        <a
-                          href={`https://wa.me/234${vendor.whatsapp.replace(/\D/g, '').replace(/^0/, '')}`}
-                          target="_blank" rel="noreferrer"
-                          className="font-bold text-slate-900 flex items-center gap-1 hover:text-emerald-600"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600" /> {vendor.whatsapp}
-                        </a>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">Email:</span>
-                        <span className="font-bold text-slate-800">{vendor.email || '—'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">NIN Verification:</span>
-                        {vendor.ninVerified ? (
-                          <span className="font-bold text-emerald-700 flex items-center gap-1">
-                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Verified
-                          </span>
-                        ) : (
-                          <span className="font-bold text-amber-700 flex items-center gap-1">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Unverified
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">Date Registered:</span>
-                        <span className="font-medium text-slate-700">{new Date(vendor.createdAt).toLocaleDateString()}</span>
-                      </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={() => setSelectedVendorId(vendor.id)} className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-xs transition cursor-pointer">
+                        <Eye className="w-4 h-4 text-amber-400" /> View Full Info
+                      </button>
+                      <button onClick={() => approveVendor(vendor.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 shadow-xs transition cursor-pointer">
+                        <CheckCircle2 className="w-4 h-4" /> Approve & Launch
+                      </button>
+                      <button onClick={() => setRejectReasonModal(vendor.id)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs px-3 py-2 rounded-xl transition cursor-pointer">Reject</button>
+                      <button onClick={() => setVendorToDeleteId(vendor.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </div>
-                );
-              })}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-white p-3 rounded-xl border border-slate-200">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">WhatsApp:</span>
+                      <a href={`https://wa.me/234${vendor.whatsapp.replace(/\D/g, '').replace(/^0/, '')}`} target="_blank" rel="noreferrer" className="font-bold text-slate-900 flex items-center gap-1 hover:text-emerald-600">
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600" /> {vendor.whatsapp}
+                      </a>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Email:</span>
+                      <span className="font-bold text-slate-800">{vendor.email || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">NIN:</span>
+                      {vendor.ninVerified
+                        ? <span className="font-bold text-emerald-700 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Verified</span>
+                        : <span className="font-bold text-amber-700 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Unverified</span>}
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Registered:</span>
+                      <span className="font-medium text-slate-700">{new Date(vendor.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: VENDOR DIRECTORY
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: VENDOR DIRECTORY ══ */}
       {activeTab === 'featured' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
-              <h3 className="font-extrabold text-lg text-slate-900">Vendor Directory & Paid Add-ons</h3>
-              <p className="text-xs text-slate-500">Manage approvals, verifications, featured placements, and assign promotional add-ons to vendors.</p>
+              <h3 className="font-extrabold text-lg text-slate-900">Vendor Directory & Promotions</h3>
+              <p className="text-xs text-slate-500">Manage approvals, verifications, and click any promotion button to instantly activate or deactivate it on the homepage.</p>
             </div>
             <div className="relative w-full lg:w-72">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search vendor name, area, category..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-50"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold">×</button>
-              )}
+              <input type="text" placeholder="Search vendor name, area, category..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-50" />
+              {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold">×</button>}
             </div>
           </div>
 
@@ -791,9 +412,7 @@ export const AdminDashboard: React.FC = () => {
               { id: 'featured', label: `Featured (${vendors.filter((v) => v.isFeatured || v.is_featured || v.featuredOnHomepage).length})` },
               { id: 'verified', label: `Verified (${vendors.filter((v) => v.ninVerified || v.nin_verified).length})` },
             ].map(({ id, label }) => (
-              <button
-                key={id}
-                onClick={() => setStatusFilter(id as any)}
+              <button key={id} onClick={() => setStatusFilter(id as any)}
                 className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
                   statusFilter === id
                     ? id === 'approved' ? 'bg-emerald-600 text-white border-emerald-600'
@@ -803,185 +422,139 @@ export const AdminDashboard: React.FC = () => {
                     : 'bg-slate-900 text-white border-slate-900'
                     : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
-              >
-                {label}
-              </button>
+              >{label}</button>
             ))}
           </div>
 
-          {/* Vendor list */}
-          <div className="divide-y divide-slate-100">
+          {/* Vendor cards */}
+          <div className="space-y-3">
             {filteredVendors.length === 0 ? (
               <div className="py-12 text-center text-slate-500 text-xs">No vendors found matching search or filter criteria.</div>
             ) : (
               filteredVendors.map((vendor) => {
-                // These derive from the LIVE vendors array — always current after any mutation
                 const isLive     = vendor.isLive || vendor.status === 'approved';
                 const isVerified = Boolean(vendor.ninVerified || vendor.nin_verified);
                 const isFeatured = Boolean(vendor.isFeatured ?? vendor.is_featured ?? vendor.featuredOnHomepage);
-
-                const activeTypes           = vendorActivePromos[vendor.id] || new Set();
-                const hasActiveFeatProd     = activeTypes.has('featured_product');
-                const hasActiveSponsored    = activeTypes.has('sponsored_vendor');
-                const hasActiveCategorySpot = activeTypes.has('category_top_spot');
-                const hasActiveBanner       = activeTypes.has('homepage_banner');
+                const activeTypes = vendorActivePromos[vendor.id] || new Set();
 
                 return (
-                  <div key={vendor.id} className="py-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3 hover:bg-slate-50/50 px-3 rounded-2xl transition border border-slate-100 mb-2 bg-white">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img
-                        src={vendor.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'}
-                        alt={vendor.businessName}
-                        className="w-11 h-11 rounded-xl object-cover border border-slate-200 shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className="font-extrabold text-sm text-slate-900 truncate">{vendor.businessName}</h4>
-                          {isLive ? (
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-300 shrink-0">Live</span>
-                          ) : vendor.status === 'rejected' ? (
-                            <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-300 shrink-0">Rejected</span>
-                          ) : (
-                            <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-300 shrink-0">Pending</span>
-                          )}
-                          {isVerified && (
-                            <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-blue-300 flex items-center gap-0.5 shrink-0">
-                              <ShieldCheck className="w-3 h-3 text-blue-600" /> Verified
-                            </span>
-                          )}
-                          {isFeatured && (
-                            <span className="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-purple-300 flex items-center gap-0.5 shrink-0">
-                              <Star className="w-3 h-3 text-purple-600 fill-purple-600" /> Featured
-                            </span>
-                          )}
+                  <div key={vendor.id} className="bg-white border border-slate-200 rounded-2xl p-4 hover:border-slate-300 transition space-y-3">
+                    {/* Row 1: vendor info + status badges */}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img src={vendor.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'} alt={vendor.businessName} className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="font-extrabold text-sm text-slate-900 truncate">{vendor.businessName}</h4>
+                            {isLive
+                              ? <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-300 shrink-0">Live</span>
+                              : vendor.status === 'rejected'
+                              ? <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-300 shrink-0">Rejected</span>
+                              : <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-300 shrink-0">Pending</span>}
+                            {isVerified && <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-blue-300 flex items-center gap-0.5 shrink-0"><ShieldCheck className="w-3 h-3 text-blue-600" /> Verified</span>}
+                            {isFeatured && <span className="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-purple-300 flex items-center gap-0.5 shrink-0"><Star className="w-3 h-3 text-purple-600 fill-purple-600" /> Featured</span>}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5 truncate">📍 {vendor.area} • {vendor.subCategory} • {vendor.ownerName}</p>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5 truncate">📍 {vendor.area} • {vendor.subCategory} • {vendor.ownerName}</p>
+                      </div>
+                      {/* Actions: view, visit, delete */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button onClick={() => setSelectedVendorId(vendor.id)} className="px-2.5 py-1.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer text-xs">
+                          <Eye className="w-3.5 h-3.5 text-amber-400" /> Info
+                        </button>
+                        <button onClick={() => navigateToStore(vendor.slug)} className="p-1.5 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition cursor-pointer" title="Visit Storefront">
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setVendorToDeleteId(vendor.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer" title="Delete Business">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-xs flex-wrap shrink-0">
-                      {/* Approve toggle */}
+                    {/* Row 2: Status toggles */}
+                    <div className="flex items-center gap-2 flex-wrap border-t border-slate-100 pt-2.5">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Status:</span>
                       <button
                         onClick={() => toggleVendorApproval(vendor.id)}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          isLive
-                            ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'
-                        }`}
-                        title={isLive ? 'Click to unapprove' : 'Click to approve'}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${isLive ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'}`}
                       >
                         {isLive ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5 text-slate-400" />}
                         {isLive ? 'Live' : 'Approve'}
                       </button>
-
-                      {/* Verify NIN toggle */}
                       <button
                         onClick={() => toggleVendorVerification(vendor.id)}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          isVerified
-                            ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700'
-                        }`}
-                        title={isVerified ? 'Click to remove verification' : 'Click to verify NIN'}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${isVerified ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700'}`}
                       >
                         <ShieldCheck className={`w-3.5 h-3.5 ${isVerified ? 'text-white' : 'text-slate-400'}`} />
-                        {isVerified ? 'Verified' : 'Verify'}
+                        {isVerified ? 'Verified' : 'Verify NIN'}
                       </button>
-
-                      {/* Feature toggle */}
                       <button
                         onClick={() => toggleVendorFeatured(vendor.id)}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          isFeatured
-                            ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700'
-                        }`}
-                        title={isFeatured ? 'Click to unfeature' : 'Click to feature'}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${isFeatured ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700'}`}
                       >
                         <Star className={`w-3.5 h-3.5 ${isFeatured ? 'fill-white text-white' : 'text-slate-400'}`} />
                         {isFeatured ? 'Featured' : 'Feature'}
                       </button>
+                    </div>
 
-                      {/* 1. Featured Product Button */}
+                    {/* Row 3: Paid promotion slots — click to toggle on/off, reflects on homepage immediately */}
+                    <div className="flex items-center gap-2 flex-wrap border-t border-slate-100 pt-2.5">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Paid Ads:</span>
+
+                      {/* Featured Product */}
                       <button
-                        onClick={() => handleOpenAssignPromo(vendor.id, 'featured_product')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          hasActiveFeatProd
-                            ? 'bg-amber-500 text-slate-950 border-amber-500 hover:bg-amber-400'
-                            : 'bg-slate-50 text-amber-900 border-amber-200 hover:bg-amber-100 hover:border-amber-300'
+                        onClick={() => handleDirectActivatePromo(vendor, 'featured_product')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
+                          activeTypes.has('featured_product')
+                            ? 'bg-amber-500 text-slate-950 border-amber-500 hover:bg-amber-600'
+                            : 'bg-slate-50 text-amber-800 border-amber-200 hover:bg-amber-50'
                         }`}
-                        title={hasActiveFeatProd ? 'Featured Product Active — Click to manage' : 'Assign Featured Product Slot'}
+                        title={activeTypes.has('featured_product') ? 'Click to deactivate' : 'Click to activate Featured Product'}
                       >
-                        <Zap className={`w-3.5 h-3.5 ${hasActiveFeatProd ? 'text-slate-950 fill-slate-950' : 'text-amber-600'}`} />
-                        {hasActiveFeatProd ? 'Feat. Product ✓' : 'Featured Product'}
+                        <Zap className={`w-3.5 h-3.5 ${activeTypes.has('featured_product') ? 'text-slate-950' : 'text-amber-600'}`} />
+                        {activeTypes.has('featured_product') ? 'Feat. Product ✓' : 'Feat. Product'}
                       </button>
 
-                      {/* 2. Sponsored Vendor Slot Button */}
+                      {/* Sponsored Vendor */}
                       <button
-                        onClick={() => handleOpenAssignPromo(vendor.id, 'sponsored_vendor')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          hasActiveSponsored
+                        onClick={() => handleDirectActivatePromo(vendor, 'sponsored_vendor')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
+                          activeTypes.has('sponsored_vendor')
                             ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
-                            : 'bg-slate-50 text-purple-900 border-purple-200 hover:bg-purple-100 hover:border-purple-300'
+                            : 'bg-slate-50 text-purple-800 border-purple-200 hover:bg-purple-50'
                         }`}
-                        title={hasActiveSponsored ? 'Sponsored Vendor Active — Click to manage' : 'Assign Sponsored Vendor Slot'}
+                        title={activeTypes.has('sponsored_vendor') ? 'Click to deactivate' : 'Click to activate Sponsored Vendor'}
                       >
-                        <Sparkles className={`w-3.5 h-3.5 ${hasActiveSponsored ? 'text-white' : 'text-purple-600'}`} />
-                        {hasActiveSponsored ? 'Sponsored Slot ✓' : 'Sponsored Vendor Slot'}
+                        <Sparkles className={`w-3.5 h-3.5 ${activeTypes.has('sponsored_vendor') ? 'text-white' : 'text-purple-600'}`} />
+                        {activeTypes.has('sponsored_vendor') ? 'Sponsored ✓' : 'Sponsored'}
                       </button>
 
-                      {/* 3. Category Top Spot Button */}
+                      {/* Category Top Spot */}
                       <button
-                        onClick={() => handleOpenAssignPromo(vendor.id, 'category_top_spot')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          hasActiveCategorySpot
+                        onClick={() => handleDirectActivatePromo(vendor, 'category_top_spot')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
+                          activeTypes.has('category_top_spot')
                             ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                            : 'bg-slate-50 text-blue-900 border-blue-200 hover:bg-blue-100 hover:border-blue-300'
+                            : 'bg-slate-50 text-blue-800 border-blue-200 hover:bg-blue-50'
                         }`}
-                        title={hasActiveCategorySpot ? 'Category Top Spot Active — Click to manage' : 'Assign Category Top Spot'}
+                        title={activeTypes.has('category_top_spot') ? 'Click to deactivate' : 'Click to activate Category Top Spot'}
                       >
-                        <Award className={`w-3.5 h-3.5 ${hasActiveCategorySpot ? 'text-white' : 'text-blue-600'}`} />
-                        {hasActiveCategorySpot ? 'Category Spot ✓' : 'Category Top Spot'}
+                        <Award className={`w-3.5 h-3.5 ${activeTypes.has('category_top_spot') ? 'text-white' : 'text-blue-600'}`} />
+                        {activeTypes.has('category_top_spot') ? 'Cat. Top Spot ✓' : 'Cat. Top Spot'}
                       </button>
 
-                      {/* 4. Homepage Banner Slot Button */}
+                      {/* Homepage Banner */}
                       <button
-                        onClick={() => handleOpenAssignPromo(vendor.id, 'homepage_banner')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                          hasActiveBanner
+                        onClick={() => handleDirectActivatePromo(vendor, 'homepage_banner')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
+                          activeTypes.has('homepage_banner')
                             ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                            : 'bg-slate-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300'
+                            : 'bg-slate-50 text-emerald-800 border-emerald-200 hover:bg-emerald-50'
                         }`}
-                        title={hasActiveBanner ? 'Homepage Banner Active — Click to manage' : 'Assign Homepage Banner Slot'}
+                        title={activeTypes.has('homepage_banner') ? 'Click to deactivate' : 'Click to activate Homepage Banner'}
                       >
-                        <LayoutTemplate className={`w-3.5 h-3.5 ${hasActiveBanner ? 'text-white' : 'text-emerald-600'}`} />
-                        {hasActiveBanner ? 'Homepage Banner ✓' : 'Homepage Banner Slot'}
-                      </button>
-
-                      {/* View details */}
-                      <button
-                        onClick={() => setSelectedVendorId(vendor.id)}
-                        className="px-2.5 py-1.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-amber-400" /> Info
-                      </button>
-
-                      {/* Visit store */}
-                      <button
-                        onClick={() => navigateToStore(vendor.slug)}
-                        className="p-1.5 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition cursor-pointer"
-                        title="Visit Storefront"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </button>
-
-                      {/* Delete */}
-                      <button
-                        onClick={() => setVendorToDeleteId(vendor.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
-                        title="Delete Business"
-                      >
-                        <Trash2 className="w-4 h-4" />
+                        <LayoutTemplate className={`w-3.5 h-3.5 ${activeTypes.has('homepage_banner') ? 'text-white' : 'text-emerald-600'}`} />
+                        {activeTypes.has('homepage_banner') ? 'Banner ✓' : 'Banner'}
                       </button>
                     </div>
                   </div>
@@ -992,16 +565,14 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: ANALYTICS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: ANALYTICS ══ */}
       {activeTab === 'analytics' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {[
-            { label: 'Total Vendors',           value: vendors.length,     sub: `${approvedVendors.length} Live Stores`,        color: 'text-slate-900' },
-            { label: 'Total Listed Products',   value: products.length,    sub: 'Indexed in Search',                           color: 'text-emerald-600' },
-            { label: 'Active Monthly Users',    value: '14,850+',          sub: `Across ${ALL_IKORODU_AREAS.length} Areas`,     color: 'text-slate-900' },
-            { label: 'WhatsApp Enquiries',      value: '24,500+',          sub: 'Direct Buyer Connections',                    color: 'text-amber-500' },
+            { label: 'Total Vendors',         value: vendors.length,  sub: `${approvedVendors.length} Live Stores`,       color: 'text-slate-900' },
+            { label: 'Total Products',        value: products.length, sub: 'Indexed in Search',                          color: 'text-emerald-600' },
+            { label: 'Active Monthly Users',  value: '14,850+',       sub: `Across ${ALL_IKORODU_AREAS.length} Areas`,    color: 'text-slate-900' },
+            { label: 'WhatsApp Enquiries',    value: '24,500+',       sub: 'Direct Buyer Connections',                   color: 'text-amber-500' },
           ].map(({ label, value, sub, color }) => (
             <div key={label} className="bg-white p-6 rounded-3xl border border-slate-200 space-y-2 shadow-xs">
               <p className="text-xs font-bold text-slate-500">{label}</p>
@@ -1012,9 +583,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: PRODUCTS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: PRODUCTS ══ */}
       {activeTab === 'products' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -1038,13 +607,7 @@ export const AdminDashboard: React.FC = () => {
                       <span className="inline-block text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold">{prod.category}</span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleDeleteProductAdmin(prod.id)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer shrink-0"
-                    title="Delete Product"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <button onClick={() => handleDeleteProductAdmin(prod.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer shrink-0"><Trash2 className="w-4 h-4" /></button>
                 </div>
               );
             })}
@@ -1052,23 +615,19 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: CUSTOMERS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: CUSTOMERS ══ */}
       {activeTab === 'customers' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <h3 className="font-extrabold text-lg text-slate-900">Registered Shoppers & Customers</h3>
           <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
             <Users className="w-10 h-10 text-slate-400 mx-auto" />
             <h4 className="font-bold text-slate-900 text-sm">Customer Activity Monitoring</h4>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">Customer accounts are synced via secure cloud storage. All user details are verified for secure marketplace interaction.</p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">Customer accounts are synced via secure cloud storage.</p>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: ORDERS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: ORDERS ══ */}
       {activeTab === 'orders' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <h3 className="font-extrabold text-lg text-slate-900">Direct WhatsApp Orders & Enquiries</h3>
@@ -1080,9 +639,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: CATEGORIES
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: CATEGORIES ══ */}
       {activeTab === 'categories' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <h3 className="font-extrabold text-lg text-slate-900">Category & Sub-category Management</h3>
@@ -1096,9 +653,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: COVERAGE AREAS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: COVERAGE AREAS ══ */}
       {activeTab === 'areas' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <h3 className="font-extrabold text-lg text-slate-900">Ikorodu Area Coverage Zones</h3>
@@ -1112,9 +667,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: SETTINGS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: SETTINGS ══ */}
       {activeTab === 'settings' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
@@ -1122,53 +675,41 @@ export const AdminDashboard: React.FC = () => {
               <h3 className="font-extrabold text-lg text-slate-900">Bank & Support Settings</h3>
               <p className="text-xs text-slate-500">Configure payment details and WhatsApp support for vendor promotions</p>
             </div>
-            <form
-              onSubmit={(e) => { e.preventDefault(); updateAdminSettings({ bankName, accountName, accountNumber, whatsappSupportNumber }); }}
-              className="space-y-4 max-w-xl text-xs"
-            >
+            <form onSubmit={(e) => { e.preventDefault(); updateAdminSettings({ bankName, accountName, accountNumber, whatsappSupportNumber }); }} className="space-y-4 max-w-xl text-xs">
               {[
-                { label: 'Bank Name',               value: bankName,              setter: setBankName,              placeholder: 'e.g. FCMB' },
-                { label: 'Account Name',             value: accountName,           setter: setAccountName,           placeholder: 'e.g. Rhadsoft Tech' },
-                { label: 'Account Number',           value: accountNumber,         setter: setAccountNumber,         placeholder: 'e.g. 9474918014' },
-                { label: 'WhatsApp Support Number',  value: whatsappSupportNumber, setter: setWhatsappSupportNumber, placeholder: 'e.g. 08156655091' },
+                { label: 'Bank Name',              value: bankName,              setter: setBankName,              placeholder: 'e.g. FCMB' },
+                { label: 'Account Name',            value: accountName,           setter: setAccountName,           placeholder: 'e.g. Rhadsoft Tech' },
+                { label: 'Account Number',          value: accountNumber,         setter: setAccountNumber,         placeholder: 'e.g. 9474918014' },
+                { label: 'WhatsApp Support Number', value: whatsappSupportNumber, setter: setWhatsappSupportNumber, placeholder: 'e.g. 08156655091' },
               ].map(({ label, value, setter, placeholder }) => (
                 <div key={label}>
                   <label className="block font-bold text-slate-800 mb-1">{label}</label>
-                  <input
-                    type="text" required value={value} placeholder={placeholder}
-                    onChange={(e) => setter(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
+                  <input type="text" required value={value} placeholder={placeholder} onChange={(e) => setter(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               ))}
-              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-6 py-3 rounded-xl transition shadow-md cursor-pointer text-xs">
-                Save Settings
-              </button>
+              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-6 py-3 rounded-xl transition shadow-md cursor-pointer text-xs">Save Settings</button>
             </form>
           </div>
           <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
             <h3 className="font-extrabold text-lg text-slate-900">Platform Security & Access</h3>
             <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <span className="font-bold text-slate-700">Administrator Email</span>
-                <span className="font-extrabold text-orange-600 bg-orange-50 px-3 py-1 rounded-lg border border-orange-200">{getAdminEmail()}</span>
-              </div>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <span className="font-bold text-slate-700">Vendor Data Source</span>
-                <span className="font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">Supabase (Direct) ✓</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700">Admin Route Restriction</span>
-                <span className="font-extrabold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">Single-Admin ACTIVE ✓</span>
-              </div>
+              {[
+                { label: 'Administrator Email', value: getAdminEmail(), color: 'text-orange-600 bg-orange-50 border-orange-200' },
+                { label: 'Vendor Data Source', value: 'Supabase (Direct) ✓', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+                { label: 'Admin Route Restriction', value: 'Single-Admin ACTIVE ✓', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="flex items-center justify-between pb-3 border-b border-slate-200 last:border-0 last:pb-0">
+                  <span className="font-bold text-slate-700">{label}</span>
+                  <span className={`font-extrabold px-3 py-1 rounded-lg border ${color}`}>{value}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: AUDIT LOGS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: AUDIT LOGS ══ */}
       {activeTab === 'system-logs' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-6 shadow-xs">
           <h3 className="font-extrabold text-lg text-slate-900">System Activity & Audit Logs</h3>
@@ -1188,9 +729,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB: PROMOTIONS
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ TAB: PROMOTIONS ══ */}
       {activeTab === 'promotions' && (
         <div className="space-y-6">
           <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-6">
@@ -1199,51 +738,26 @@ export const AdminDashboard: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5" /> Platform Revenue Engine
               </span>
               <h3 className="text-2xl sm:text-3xl font-black">Promotions Management</h3>
-              <p className="text-xs text-slate-400">Manage inbound promotion requests, or assign paid add-ons directly to vendors from the Vendor Directory tab.</p>
+              <p className="text-xs text-slate-400">Manage inbound promotion requests. To activate promotions, use the Vendors Directory tab — click any paid ad button to instantly toggle it on or off on the homepage.</p>
             </div>
             <div className="bg-white/10 backdrop-blur-md p-5 rounded-2xl border border-white/15 text-right sm:min-w-[200px]">
               <p className="text-slate-300 font-bold text-xs uppercase tracking-wider">Total Ad Revenue</p>
-              <p className="text-3xl font-black text-emerald-400 mt-1">
-                ₦{(promotions || []).reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}
-              </p>
+              <p className="text-3xl font-black text-emerald-400 mt-1">₦{(promotions || []).reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}</p>
               <p className="text-[10px] text-slate-400 mt-1">{(promotions || []).length} Total Transactions</p>
             </div>
-          </div>
-
-          {/* Promo type legend */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {PROMO_TYPES.map((type) => (
-              <div key={type.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-start gap-3 shadow-xs">
-                {type.icon}
-                <div>
-                  <p className="font-extrabold text-xs text-slate-900">{type.label}</p>
-                  <p className="text-[11px] text-emerald-700 font-black">₦{type.price.toLocaleString()}/14d</p>
-                </div>
-              </div>
-            ))}
           </div>
 
           <div className="bg-white rounded-3xl p-6 border border-slate-200 space-y-5 shadow-xs">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-                <input
-                  type="text"
-                  placeholder="Search by vendor name, reference, or type..."
-                  value={promoSearchQuery}
-                  onChange={(e) => setPromoSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-300 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+                <input type="text" placeholder="Search by vendor name, reference, or type..." value={promoSearchQuery} onChange={(e) => setPromoSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-300 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500" />
               </div>
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl text-xs font-bold overflow-x-auto">
                 {(['all','pending_verification','active','expired','rejected'] as const).map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => setPromoStatusFilter(filter)}
-                    className={`px-3 py-1.5 rounded-xl capitalize transition whitespace-nowrap cursor-pointer ${
-                      promoStatusFilter === filter ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
+                  <button key={filter} onClick={() => setPromoStatusFilter(filter)}
+                    className={`px-3 py-1.5 rounded-xl capitalize transition whitespace-nowrap cursor-pointer ${promoStatusFilter === filter ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'}`}>
                     {{ all:'All', pending_verification:'Pending', active:'Active', expired:'Expired', rejected:'Rejected' }[filter]}
                   </button>
                 ))}
@@ -1254,7 +768,7 @@ export const AdminDashboard: React.FC = () => {
               <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
                 <Sparkles className="w-8 h-8 text-slate-300 mx-auto" />
                 <p className="font-bold text-sm text-slate-700">No Promotions Recorded</p>
-                <p className="text-xs text-slate-500">Promotions assigned from the Vendor Directory will appear here.</p>
+                <p className="text-xs text-slate-500">Activate promotions from the Vendor Directory tab.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1272,16 +786,15 @@ export const AdminDashboard: React.FC = () => {
                   <tbody className="divide-y divide-slate-100 text-xs font-medium">
                     {promotions
                       .filter((p) => {
-                        const matchStatus =
-                          promoStatusFilter === 'all' ||
-                          (promoStatusFilter === 'pending_verification' && (p.status === 'pending_verification' || p.status === 'pending')) ||
-                          p.status === promoStatusFilter;
+                        const matchStatus = promoStatusFilter === 'all'
+                          || (promoStatusFilter === 'pending_verification' && (p.status === 'pending_verification' || p.status === 'pending'))
+                          || p.status === promoStatusFilter;
                         const q = promoSearchQuery.toLowerCase();
-                        const matchSearch = !q ||
-                          p.vendorName?.toLowerCase().includes(q) ||
-                          p.reference?.toLowerCase().includes(q) ||
-                          p.promotionName?.toLowerCase().includes(q) ||
-                          p.promotionType?.toLowerCase().includes(q);
+                        const matchSearch = !q
+                          || p.vendorName?.toLowerCase().includes(q)
+                          || p.reference?.toLowerCase().includes(q)
+                          || p.promotionName?.toLowerCase().includes(q)
+                          || p.promotionType?.toLowerCase().includes(q);
                         return matchStatus && matchSearch;
                       })
                       .map((promo) => {
@@ -1292,14 +805,10 @@ export const AdminDashboard: React.FC = () => {
                             <td className="py-3.5 px-3">
                               <p className="font-black text-slate-900">{promo.promotionName}</p>
                               <p className="text-[11px] text-slate-500 font-bold">🏢 {promo.vendorName}</p>
-                              {promo.productName && (
-                                <p className="text-[10px] text-emerald-700 font-semibold">📦 {promo.productName}</p>
-                              )}
+                              {promo.productName && <p className="text-[10px] text-emerald-700 font-semibold">📦 {promo.productName}</p>}
                             </td>
                             <td className="py-3.5 px-3">
-                              <span className="bg-slate-100 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded uppercase border border-slate-200">
-                                {promo.promotionType}
-                              </span>
+                              <span className="bg-slate-100 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded uppercase border border-slate-200">{promo.promotionType}</span>
                             </td>
                             <td className="py-3.5 px-3">
                               <p className="font-extrabold text-emerald-700">₦{promo.amount.toLocaleString()}</p>
@@ -1307,14 +816,12 @@ export const AdminDashboard: React.FC = () => {
                             </td>
                             <td className="py-3.5 px-3">
                               <p className="text-slate-700 font-bold">{new Date(promo.createdAt || promo.paymentDate).toLocaleDateString()}</p>
-                              <p className="text-[10px] text-slate-500">
-                                {promo.status === 'active' ? `Expires: ${new Date(promo.expiryDate).toLocaleDateString()} (${daysLeft}d left)` : '—'}
-                              </p>
+                              <p className="text-[10px] text-slate-500">{promo.status === 'active' ? `Expires: ${new Date(promo.expiryDate).toLocaleDateString()} (${daysLeft}d left)` : '—'}</p>
                             </td>
                             <td className="py-3.5 px-3">
                               <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
-                                promo.status === 'active'   ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                                isPending                   ? 'bg-amber-100 text-amber-900 border border-amber-300' :
+                                promo.status === 'active' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                                isPending ? 'bg-amber-100 text-amber-900 border border-amber-300' :
                                 promo.status === 'rejected' ? 'bg-rose-100 text-rose-800 border border-rose-300' :
                                 'bg-slate-200 text-slate-700'
                               }`}>
@@ -1325,33 +832,18 @@ export const AdminDashboard: React.FC = () => {
                               <div className="flex items-center justify-end gap-1.5">
                                 {isPending && (
                                   <>
-                                    <button
-                                      onClick={() => { updatePromotionStatus(promo.id, 'active'); showToast('success', 'Activated!', `${promo.promotionName} is now active.`); }}
-                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-lg text-xs transition cursor-pointer shadow-xs"
-                                    >Verify & Activate</button>
-                                    <button
-                                      onClick={() => { updatePromotionStatus(promo.id, 'rejected'); showToast('error', 'Rejected', `Rejected for ${promo.vendorName}.`); }}
-                                      className="px-2.5 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold rounded-lg text-xs transition cursor-pointer"
-                                    >Reject</button>
+                                    <button onClick={() => { updatePromotionStatus(promo.id, 'active'); showToast('success', 'Activated!', `${promo.promotionName} is now active.`); }} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-lg text-xs transition cursor-pointer">Verify & Activate</button>
+                                    <button onClick={() => { updatePromotionStatus(promo.id, 'rejected'); showToast('error', 'Rejected', `Rejected for ${promo.vendorName}.`); }} className="px-2.5 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold rounded-lg text-xs transition cursor-pointer">Reject</button>
                                   </>
                                 )}
                                 {promo.status === 'active' && (
                                   <>
-                                    <button
-                                      onClick={() => { updatePromotionStatus(promo.id, 'active', 14); showToast('success', 'Extended', `+14 days added.`); }}
-                                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white font-extrabold rounded-lg text-[10px] transition cursor-pointer"
-                                    >+14 Days</button>
-                                    <button
-                                      onClick={() => { updatePromotionStatus(promo.id, 'expired'); showToast('info', 'Deactivated', ''); }}
-                                      className="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-lg text-[10px] transition cursor-pointer"
-                                    >Deactivate</button>
+                                    <button onClick={() => { updatePromotionStatus(promo.id, 'active', 14); showToast('success', 'Extended', `+14 days added.`); }} className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white font-extrabold rounded-lg text-[10px] transition cursor-pointer">+14 Days</button>
+                                    <button onClick={() => { updatePromotionStatus(promo.id, 'expired'); showToast('info', 'Deactivated', ''); }} className="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-lg text-[10px] transition cursor-pointer">Deactivate</button>
                                   </>
                                 )}
                                 {(promo.status === 'expired' || promo.status === 'rejected') && (
-                                  <button
-                                    onClick={() => { updatePromotionStatus(promo.id, 'active'); showToast('success', 'Re-activated', ''); }}
-                                    className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] transition cursor-pointer"
-                                  >Re-activate</button>
+                                  <button onClick={() => { updatePromotionStatus(promo.id, 'active'); showToast('success', 'Re-activated', ''); }} className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] transition cursor-pointer">Re-activate</button>
                                 )}
                               </div>
                             </td>
@@ -1366,36 +858,19 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          FULL VENDOR DETAILS MODAL
-          selectedVendorForDetails is derived live from vendors[] — never stale
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══ VENDOR DETAILS MODAL ══ */}
       {selectedVendorForDetails && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-3xl max-w-2xl w-full my-8 overflow-hidden shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]">
             <div className="relative h-44 bg-slate-900 shrink-0">
-              <img
-                src={selectedVendorForDetails.coverPhotoURL || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop'}
-                alt="Cover" className="w-full h-full object-cover opacity-60"
-              />
-              <button onClick={() => setSelectedVendorId(null)}
-                className="absolute top-3 right-3 bg-slate-950/80 text-white p-2 rounded-full hover:bg-slate-900 transition z-10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
+              <img src={selectedVendorForDetails.coverPhotoURL || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop'} alt="Cover" className="w-full h-full object-cover opacity-60" />
+              <button onClick={() => setSelectedVendorId(null)} className="absolute top-3 right-3 bg-slate-950/80 text-white p-2 rounded-full hover:bg-slate-900 transition z-10 cursor-pointer"><X className="w-5 h-5" /></button>
               <div className="absolute bottom-3 left-4 sm:left-6 flex items-end gap-3 z-10">
-                <img
-                  src={selectedVendorForDetails.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'}
-                  alt={selectedVendorForDetails.businessName}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-white shadow-xl object-cover bg-white shrink-0"
-                />
+                <img src={selectedVendorForDetails.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'} alt={selectedVendorForDetails.businessName} className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-white shadow-xl object-cover bg-white shrink-0" />
                 <div className="text-white drop-shadow-md">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-extrabold text-lg sm:text-xl">{selectedVendorForDetails.businessName}</h3>
-                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                      selectedVendorForDetails.status === 'approved' ? 'bg-emerald-500 text-white' :
-                      selectedVendorForDetails.status === 'pending'  ? 'bg-amber-500 text-slate-950' :
-                      'bg-rose-500 text-white'
-                    }`}>
+                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${selectedVendorForDetails.status === 'approved' ? 'bg-emerald-500 text-white' : selectedVendorForDetails.status === 'pending' ? 'bg-amber-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
                       {selectedVendorForDetails.status.toUpperCase()}
                     </span>
                   </div>
@@ -1408,54 +883,32 @@ export const AdminDashboard: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                 <div>
                   <span className="text-slate-400 font-semibold block text-[10px]">WhatsApp:</span>
-                  <a href={`https://wa.me/234${selectedVendorForDetails.whatsapp.replace(/\D/g,'').replace(/^0/,'')}`} target="_blank" rel="noreferrer"
-                    className="font-bold text-slate-900 hover:text-emerald-600 flex items-center gap-1.5 text-sm">
+                  <a href={`https://wa.me/234${selectedVendorForDetails.whatsapp.replace(/\D/g,'').replace(/^0/,'')}`} target="_blank" rel="noreferrer" className="font-bold text-slate-900 hover:text-emerald-600 flex items-center gap-1.5 text-sm">
                     <MessageCircle className="w-4 h-4 text-emerald-600" /> {selectedVendorForDetails.whatsapp}
                   </a>
                 </div>
-                <div>
-                  <span className="text-slate-400 font-semibold block text-[10px]">Email:</span>
-                  <span className="font-bold text-slate-900">{selectedVendorForDetails.email || '—'}</span>
-                </div>
+                <div><span className="text-slate-400 font-semibold block text-[10px]">Email:</span><span className="font-bold text-slate-900">{selectedVendorForDetails.email || '—'}</span></div>
                 <div>
                   <span className="text-slate-400 font-semibold block text-[10px]">Address:</span>
-                  <span className="font-bold text-slate-900 flex items-center gap-1 text-xs">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-600" /> {selectedVendorForDetails.address} ({selectedVendorForDetails.area})
-                  </span>
+                  <span className="font-bold text-slate-900 flex items-center gap-1 text-xs"><MapPin className="w-3.5 h-3.5 text-emerald-600" /> {selectedVendorForDetails.address} ({selectedVendorForDetails.area})</span>
                 </div>
                 <div>
                   <span className="text-slate-400 font-semibold block text-[10px]">NIN Verification:</span>
-                  {selectedVendorForDetails.ninVerified ? (
-                    <span className="font-bold text-emerald-700 flex items-center gap-1 text-xs">
-                      <ShieldCheck className="w-4 h-4 text-emerald-600" /> Verified — {selectedVendorForDetails.ninData?.fullName || 'Match Confirmed'}
-                    </span>
-                  ) : (
-                    <span className="font-bold text-amber-700 flex items-center gap-1 text-xs">
-                      <AlertCircle className="w-4 h-4 text-amber-500" /> Unverified
-                    </span>
-                  )}
+                  {selectedVendorForDetails.ninVerified
+                    ? <span className="font-bold text-emerald-700 flex items-center gap-1 text-xs"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Verified — {selectedVendorForDetails.ninData?.fullName || 'Match Confirmed'}</span>
+                    : <span className="font-bold text-amber-700 flex items-center gap-1 text-xs"><AlertCircle className="w-4 h-4 text-amber-500" /> Unverified</span>}
                 </div>
-                <div>
-                  <span className="text-slate-400 font-semibold block text-[10px]">Registered:</span>
-                  <span className="font-medium text-slate-800">{new Date(selectedVendorForDetails.createdAt).toLocaleString()}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-semibold block text-[10px]">Category:</span>
-                  <span className="font-bold text-slate-900">{selectedVendorForDetails.subCategory}</span>
-                </div>
+                <div><span className="text-slate-400 font-semibold block text-[10px]">Registered:</span><span className="font-medium text-slate-800">{new Date(selectedVendorForDetails.createdAt).toLocaleString()}</span></div>
+                <div><span className="text-slate-400 font-semibold block text-[10px]">Category:</span><span className="font-bold text-slate-900">{selectedVendorForDetails.subCategory}</span></div>
               </div>
 
               <div className="space-y-1.5">
                 <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider">Store Description</h4>
-                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 leading-relaxed text-slate-800">
-                  {selectedVendorForDetails.description || 'No description provided.'}
-                </div>
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 leading-relaxed text-slate-800">{selectedVendorForDetails.description || 'No description provided.'}</div>
               </div>
 
               <div className="space-y-2">
-                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider">
-                  Products ({products.filter((p) => p.vendorId === selectedVendorForDetails.id).length})
-                </h4>
+                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider">Products ({products.filter((p) => p.vendorId === selectedVendorForDetails.id).length})</h4>
                 {products.filter((p) => p.vendorId === selectedVendorForDetails.id).length === 0 ? (
                   <p className="text-slate-400 italic">No products listed yet.</p>
                 ) : (
@@ -1474,145 +927,54 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Modal footer — buttons derive live state, never stale */}
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <button
-                onClick={() => { navigateToStore(selectedVendorForDetails.slug); setSelectedVendorId(null); }}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
-              >
+              <button onClick={() => { navigateToStore(selectedVendorForDetails.slug); setSelectedVendorId(null); }} className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer">
                 <ExternalLink className="w-4 h-4" /> Preview Store
               </button>
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Approve — reflects live state */}
-                <button
-                  onClick={() => toggleVendorApproval(selectedVendorForDetails.id)}
-                  className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${
-                    selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved'
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'
-                  }`}
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  {selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved' ? 'Approved (Live)' : 'Approve Store'}
+                <button onClick={() => toggleVendorApproval(selectedVendorForDetails.id)} className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'}`}>
+                  <CheckCircle2 className="w-4 h-4" /> {selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved' ? 'Approved (Live)' : 'Approve Store'}
                 </button>
-                {/* Verify — reflects live state */}
-                <button
-                  onClick={() => toggleVendorVerification(selectedVendorForDetails.id)}
-                  className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${
-                    selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-blue-100 text-blue-900 hover:bg-blue-200'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  {selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified ? 'Verified ✓' : 'Verify NIN'}
+                <button onClick={() => toggleVendorVerification(selectedVendorForDetails.id)} className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-100 text-blue-900 hover:bg-blue-200'}`}>
+                  <ShieldCheck className="w-4 h-4" /> {selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified ? 'Verified ✓' : 'Verify NIN'}
                 </button>
-                {/* Feature — reflects live state */}
-                <button
-                  onClick={() => toggleVendorFeatured(selectedVendorForDetails.id)}
-                  className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${
-                    selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage
-                      ? 'bg-purple-600 text-white hover:bg-purple-700'
-                      : 'bg-purple-100 text-purple-900 hover:bg-purple-200'
-                  }`}
-                >
-                  <Star className="w-4 h-4" />
-                  {selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'Featured ★' : 'Feature Vendor'}
+                <button onClick={() => toggleVendorFeatured(selectedVendorForDetails.id)} className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-100 text-purple-900 hover:bg-purple-200'}`}>
+                  <Star className="w-4 h-4" /> {selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'Featured ★' : 'Feature Vendor'}
                 </button>
-                {/* 1. Featured Product */}
-                <button
-                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'featured_product'); setSelectedVendorId(null); }}
-                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-amber-100 text-amber-900 hover:bg-amber-200"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-700" /> Feat. Product
-                </button>
-                {/* 2. Sponsored Vendor */}
-                <button
-                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'sponsored_vendor'); setSelectedVendorId(null); }}
-                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-purple-100 text-purple-900 hover:bg-purple-200"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-purple-700" /> Sponsored
-                </button>
-                {/* 3. Category Top Spot */}
-                <button
-                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'category_top_spot'); setSelectedVendorId(null); }}
-                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-blue-100 text-blue-900 hover:bg-blue-200"
-                >
-                  <Award className="w-3.5 h-3.5 text-blue-700" /> Top Spot
-                </button>
-                {/* 4. Homepage Banner Slot */}
-                <button
-                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'homepage_banner'); setSelectedVendorId(null); }}
-                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
-                >
-                  <LayoutTemplate className="w-3.5 h-3.5 text-emerald-700" /> Banner Slot
-                </button>
-                {/* Delete */}
-                <button
-                  onClick={() => setVendorToDeleteId(selectedVendorForDetails.id)}
-                  className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer"
-                >
+                <button onClick={() => setVendorToDeleteId(selectedVendorForDetails.id)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer">
                   <Trash2 className="w-4 h-4" /> Delete
                 </button>
-                <button
-                  onClick={() => setSelectedVendorId(null)}
-                  className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition cursor-pointer"
-                >
-                  Close
-                </button>
+                <button onClick={() => setSelectedVendorId(null)} className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition cursor-pointer">Close</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Assign Promotion Modal ─────────────────────────────────────────── */}
-      {assignPromoVendor && (
-        <AssignPromoModal
-          vendor={assignPromoVendor}
-          products={products}
-          initialType={assignPromoInitialType}
-          onClose={() => setAssignPromoVendorId(null)}
-          onAssign={handleAssignPromotion}
-        />
-      )}
-
-      {/* ── Delete Confirmation Modal ─────────────────────────────────────── */}
+      {/* Delete Confirmation Modal */}
       {vendorToDelete && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-rose-200">
-            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
-            </div>
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto"><Trash2 className="w-6 h-6" /></div>
             <div className="text-center space-y-1">
               <h3 className="font-extrabold text-lg text-slate-900">Delete Business Permanently?</h3>
-              <p className="text-xs text-slate-600">
-                Are you sure you want to delete <strong className="text-slate-900">{vendorToDelete.businessName}</strong>?
-                This removes the vendor and all their products from IkoroduSquare and Supabase.
-              </p>
+              <p className="text-xs text-slate-600">Are you sure you want to delete <strong className="text-slate-900">{vendorToDelete.businessName}</strong>? This removes the vendor and all their products from IkoroduSquare and Supabase.</p>
             </div>
             <div className="flex items-center justify-center gap-3 pt-2">
               <button onClick={() => setVendorToDeleteId(null)} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">Cancel</button>
-              <button onClick={handleConfirmDelete} className="bg-rose-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md hover:bg-rose-700 transition cursor-pointer">
-                Yes, Delete Business
-              </button>
+              <button onClick={handleConfirmDelete} className="bg-rose-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md hover:bg-rose-700 transition cursor-pointer">Yes, Delete Business</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Reject Reason Modal ───────────────────────────────────────────── */}
+      {/* Reject Reason Modal */}
       {rejectReasonModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-rose-200">
             <h3 className="font-extrabold text-lg text-slate-900">Reject Application</h3>
             <p className="text-xs text-slate-600">Provide a clear reason to be sent to the vendor via WhatsApp:</p>
-            <textarea
-              rows={3} required value={rejectReasonText}
-              onChange={(e) => setRejectReasonText(e.target.value)}
-              placeholder="e.g. Please upload a clear photo of your shop storefront in Ikorodu."
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
-            />
+            <textarea rows={3} required value={rejectReasonText} onChange={(e) => setRejectReasonText(e.target.value)} placeholder="e.g. Please upload a clear photo of your shop storefront in Ikorodu." className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-rose-500 outline-none" />
             <div className="flex items-center justify-end gap-2 pt-2">
               <button onClick={() => { setRejectReasonModal(null); setRejectReasonText(''); }} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">Cancel</button>
               <button onClick={handleConfirmReject} className="bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md hover:bg-rose-700 cursor-pointer">Send Rejection Notice</button>
