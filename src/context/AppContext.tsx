@@ -79,7 +79,7 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// ── Pure Supabase vendor fetcher — no localStorage involved ────────────────
+// ── Pure Supabase vendor fetcher ───────────────────────────────────────────
 async function fetchVendorsFromSupabase(): Promise<Vendor[]> {
   if (!supabase) return StorageManager.getVendors();
   try {
@@ -95,10 +95,31 @@ async function fetchVendorsFromSupabase(): Promise<Vendor[]> {
   }
 }
 
+// ── Fetch all non-vendor data from Supabase in parallel ───────────────────
+async function fetchNonVendorData() {
+  const [products, reviews, enquiries, banners, promotions, settings] = await Promise.allSettled([
+    StorageManager.getProductsAsync(),
+    StorageManager.getReviewsAsync(),
+    StorageManager.getEnquiriesAsync(),
+    StorageManager.getBannersAsync(),
+    StorageManager.getPromotionsAsync(),
+    StorageManager.getSettingsAsync(),
+  ]);
+
+  return {
+    products:      products.status      === 'fulfilled' ? products.value      : [],
+    reviews:       reviews.status       === 'fulfilled' ? reviews.value       : [],
+    enquiries:     enquiries.status     === 'fulfilled' ? enquiries.value     : [],
+    banners:       banners.status       === 'fulfilled' ? banners.value       : [],
+    promotions:    promotions.status    === 'fulfilled' ? promotions.value    : [],
+    settings:      settings.status      === 'fulfilled' ? settings.value      : DEFAULT_ADMIN_SETTINGS,
+  };
+}
+
 // ── Provider ───────────────────────────────────────────────────────────────
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
-  // ── Route helpers ────────────────────────────────────────────────────────
+  // ── Route helpers ─────────────────────────────────────────────────────────
   const getInitialPageAndSlug = () => {
     if (typeof window === 'undefined') return { page: 'home', slug: null, adminMode: false };
 
@@ -143,6 +164,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (pathLower === '/dashboard' || pathLower === '/vendor-dashboard') return { page: 'dashboard', slug: null, adminMode: false };
     if (pathLower === '/profile' || pathLower === '/user-profile') return { page: 'profile', slug: null, adminMode: false };
 
+    // Route memory — only used for navigation state, not data
     try {
       const savedPage = localStorage.getItem('ikorodusquare_last_page');
       const savedSlug = localStorage.getItem('ikorodusquare_last_slug');
@@ -160,6 +182,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateUrlAndStorage = (page: string, slug: string | null = null) => {
     if (typeof window === 'undefined') return;
+    // Route memory only — not data storage
     try {
       localStorage.setItem('ikorodusquare_last_page', page);
       if (slug) localStorage.setItem('ikorodusquare_last_slug', slug);
@@ -180,34 +203,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // ── State ────────────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────
   const initialNav = getInitialPageAndSlug();
-  const [currentPage, setCurrentPageState] = useState<string>(initialNav.page);
-  const [activeVendorSlug, setActiveVendorSlug] = useState<string | null>(initialNav.slug);
-
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-
-  // Vendors live ONLY in React state — fetched from Supabase, never localStorage
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-
-  const [products, setProducts] = useState<Product[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
-  const [banners, setBanners] = useState<BannerAd[]>([]);
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [promotions, setPromotions] = useState<Promotion[]>([]);
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => StorageManager.getSettings());
-  const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const [searchType, setSearchType] = useState<'business' | 'product'>('business');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [selectedArea, setSelectedArea] = useState<string>('All');
-
-  const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(initialNav.adminMode);
-  const [language, setLanguageState] = useState<Language>(() => {
+  const [currentPage,       setCurrentPageState] = useState<string>(initialNav.page);
+  const [activeVendorSlug,  setActiveVendorSlug] = useState<string | null>(initialNav.slug);
+  const [isLoading,         setIsLoading]         = useState<boolean>(true);
+  const [currentUser,       setCurrentUser]       = useState<User | null>(null);
+  const [vendors,           setVendors]           = useState<Vendor[]>([]);
+  const [products,          setProducts]          = useState<Product[]>([]);
+  const [reviews,           setReviews]           = useState<Review[]>([]);
+  const [enquiries,         setEnquiries]         = useState<Enquiry[]>([]);
+  const [banners,           setBanners]           = useState<BannerAd[]>([]);
+  const [favorites,         setFavorites]         = useState<string[]>([]);
+  const [promotions,        setPromotions]        = useState<Promotion[]>([]);
+  const [adminSettings,     setAdminSettings]     = useState<AdminSettings>(DEFAULT_ADMIN_SETTINGS);
+  const [toasts,            setToasts]            = useState<Toast[]>([]);
+  const [searchType,        setSearchType]        = useState<'business' | 'product'>('business');
+  const [searchQuery,       setSearchQuery]       = useState<string>('');
+  const [selectedCategory,  setSelectedCategory]  = useState<string>('All');
+  const [selectedArea,      setSelectedArea]      = useState<string>('All');
+  const [showSetupModal,    setShowSetupModal]    = useState<boolean>(false);
+  const [isAdminMode,       setIsAdminMode]       = useState<boolean>(initialNav.adminMode);
+  const [language,          setLanguageState]     = useState<Language>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('ikorodusquare_lang');
       if (saved === 'yo' || saved === 'en') return saved;
@@ -217,7 +234,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const isMountedRef = useRef(true);
 
-  // ── Language ─────────────────────────────────────────────────────────────
+  // ── Language ──────────────────────────────────────────────────────────────
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
     if (typeof window !== 'undefined') localStorage.setItem('ikorodusquare_lang', lang);
@@ -245,56 +262,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // ── Core data refresh ─────────────────────────────────────────────────────
-  // Vendors always come from Supabase directly — no localStorage read/write
+  // ── Core data refresh — ALL data from Supabase ────────────────────────────
   const refreshData = async (): Promise<void> => {
-    StorageManager.checkAndSyncPromotionExpiries();
+    // Check promotion expiries in Supabase (fire-and-forget)
+    StorageManager.checkAndSyncPromotionExpiries().catch((e) =>
+      console.warn('[refreshData] expiry check warning:', e)
+    );
 
-    // Always fetch vendors fresh from Supabase
-    const freshVendors = await fetchVendorsFromSupabase();
-    if (isMountedRef.current && freshVendors.length > 0) {
-      setVendors(freshVendors);
+    // Fetch vendors and non-vendor data in parallel
+    const [freshVendors, nonVendor] = await Promise.allSettled([
+      fetchVendorsFromSupabase(),
+      fetchNonVendorData(),
+    ]);
+
+    if (!isMountedRef.current) return;
+
+    if (freshVendors.status === 'fulfilled' && freshVendors.value.length > 0) {
+      setVendors(freshVendors.value);
     }
 
-    // Non-vendor data (still uses StorageManager for now)
-    if (isMountedRef.current) {
-      setPromotions(StorageManager.getPromotions());
-      setAdminSettings(StorageManager.getSettings());
-      setProducts(StorageManager.getProducts());
-      setReviews(StorageManager.getReviews());
-      setEnquiries(StorageManager.getEnquiries());
-      setBanners(StorageManager.getBanners());
-      setFavorites(StorageManager.getFavorites());
+    if (nonVendor.status === 'fulfilled') {
+      const d = nonVendor.value;
+      setProducts(d.products);
+      setReviews(d.reviews);
+      setEnquiries(d.enquiries);
+      setBanners(d.banners);
+      setPromotions(d.promotions);
+      setAdminSettings(d.settings);
     }
+
+    setFavorites(StorageManager.getFavorites()); // stays in localStorage
   };
 
   // ── Settings ──────────────────────────────────────────────────────────────
-  const updateAdminSettings = (settings: AdminSettings) => {
-    StorageManager.saveSettings(settings);
+  const updateAdminSettings = async (settings: AdminSettings) => {
+    await StorageManager.saveSettingsAsync(settings);
     setAdminSettings(settings);
     showToast('success', 'Settings Saved', 'Bank account and WhatsApp support settings updated.');
   };
 
   // ── Promotions ────────────────────────────────────────────────────────────
   const createPromotionRequest = async (promo: Promotion) => {
-    StorageManager.createPromotionRequest(promo);
-    await refreshData();
+    await StorageManager.createPromotionRequestAsync(promo);
+    const fresh = await StorageManager.getPromotionsAsync();
+    if (isMountedRef.current) setPromotions(fresh);
   };
 
   const activatePromotion = async (promo: Promotion) => {
-    StorageManager.activatePromotion(promo);
-    await refreshData();
+    await StorageManager.activatePromotionAsync(promo);
+    const fresh = await StorageManager.getPromotionsAsync();
+    if (isMountedRef.current) setPromotions(fresh);
     showToast('success', 'Promotion Active!', 'Your promotion has been verified and activated.');
   };
 
   const updatePromotionStatus = async (id: string, newStatus: PromotionStatus, extendDays: number = 0) => {
-    StorageManager.updatePromotionStatus(id, newStatus, extendDays);
-    await refreshData();
+    await StorageManager.updatePromotionStatusAsync(id, newStatus, extendDays);
+    const fresh = await StorageManager.getPromotionsAsync();
+    if (isMountedRef.current) setPromotions(fresh);
     const readableStatus = newStatus === 'pending_verification' ? 'Pending Verification' : newStatus;
     showToast('info', 'Promotion Updated', `Promotion status updated to ${readableStatus}.`);
   };
 
-  // ── Auth resolution ────────────────────────────────────────────────────────
+  // ── Auth resolution ───────────────────────────────────────────────────────
   const resolveUserFromSupabase = async (supaUser: any): Promise<User> => {
     const email = supaUser.email || '';
     const isAdmin = isAdminEmail(email);
@@ -313,15 +342,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    // Fallback to seed vendors only — never localStorage
     if (!matchingVendor) {
-      const localVendors = StorageManager.getVendors();
-      matchingVendor = localVendors.find((v) => v.email?.toLowerCase() === email.toLowerCase()) || null;
+      matchingVendor = StorageManager.getVendors().find(
+        (v) => v.email?.toLowerCase() === email.toLowerCase()
+      ) || null;
     }
 
     let supaUserRow: any = null;
     if (supabase) {
       try {
-        const { data: uRow } = await supabase.from('users').select('*').eq('id', supaUser.id).maybeSingle();
+        const { data: uRow } = await supabase
+          .from('users').select('*').eq('id', supaUser.id).maybeSingle();
         if (uRow) supaUserRow = uRow;
       } catch (e) {
         console.warn('Supabase user row resolution query warning:', e);
@@ -334,7 +366,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? 'vendor'
       : (supaUserRow?.role || supaUser.user_metadata?.role || 'customer');
 
-    const vendorId = matchingVendor ? matchingVendor.id : (supaUserRow?.vendor_id || undefined);
+    const vendorId = matchingVendor
+      ? matchingVendor.id
+      : (supaUserRow?.vendor_id || undefined);
 
     const name = isAdmin
       ? 'Platform Administrator'
@@ -343,7 +377,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       : supaUserRow?.name || supaUser.user_metadata?.full_name || email.split('@')[0] || 'Ikorodu Shopper';
 
     const phone = matchingVendor?.phone || matchingVendor?.whatsapp || supaUserRow?.phone || supaUser.phone || '';
-    const area = matchingVendor?.area || supaUserRow?.area || supaUser.user_metadata?.area || '';
+    const area  = matchingVendor?.area  || supaUserRow?.area  || supaUser.user_metadata?.area || '';
 
     return {
       id: supaUser.id,
@@ -359,96 +393,92 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ── StorageManager vendor-change hook ─────────────────────────────────────
-  // Register fetchVendorsFromSupabase as the callback that mockStorage.ts
-  // calls after every confirmed vendor INSERT / UPDATE / DELETE.
-  // This is what makes a newly registered vendor appear in the Admin Approval
-  // Queue immediately — without waiting for the realtime channel to fire.
   useEffect(() => {
     StorageManager.onVendorChange = () => {
       if (!isMountedRef.current) return;
       fetchVendorsFromSupabase()
         .then((fresh) => {
-          if (isMountedRef.current && fresh.length > 0) {
-            setVendors(fresh);
-          }
+          if (isMountedRef.current && fresh.length > 0) setVendors(fresh);
         })
         .catch((e) => console.warn('[onVendorChange] fetch error:', e));
     };
-
-    return () => {
-      StorageManager.onVendorChange = null;
-    };
-  }, []); // runs once on mount; stable — fetchVendorsFromSupabase and setVendors never change
+    return () => { StorageManager.onVendorChange = null; };
+  }, []);
 
   // ── Boot effect ───────────────────────────────────────────────────────────
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Seed non-vendor data from localStorage immediately for fast first paint
-    const seedNonVendorFromCache = () => {
-      if (!isMountedRef.current) return;
-      setPromotions(StorageManager.getPromotions());
-      setAdminSettings(StorageManager.getSettings());
-      setProducts(StorageManager.getProducts());
-      setReviews(StorageManager.getReviews());
-      setEnquiries(StorageManager.getEnquiries());
-      setBanners(StorageManager.getBanners());
-      setFavorites(StorageManager.getFavorites());
-      // NOTE: vendors are NOT seeded from localStorage — they come from Supabase only
-    };
-
-    seedNonVendorFromCache();
-
-    let authComplete = false;
+    let authComplete        = false;
     let vendorFetchComplete = false;
+    let dataFetchComplete   = false;
 
     const checkHydrationComplete = () => {
-      if (authComplete && vendorFetchComplete && isMountedRef.current) {
+      if (authComplete && vendorFetchComplete && dataFetchComplete && isMountedRef.current) {
         setIsLoading(false);
       }
     };
 
-    // Safety fallback so loading state never hangs
+    // Safety fallback — never hang the loading screen
     const fallbackTimer = setTimeout(() => {
       if (isMountedRef.current) setIsLoading(false);
-    }, 3000);
+    }, 5000);
 
-    // Fetch vendors directly from Supabase on boot — bypass localStorage entirely
+    // 1. Fetch vendors from Supabase
     fetchVendorsFromSupabase()
       .then((freshVendors) => {
-        if (isMountedRef.current && freshVendors.length > 0) {
-          setVendors(freshVendors);
-        }
+        if (isMountedRef.current && freshVendors.length > 0) setVendors(freshVendors);
         vendorFetchComplete = true;
         checkHydrationComplete();
       })
       .catch((e) => {
-        console.warn('[Boot] Vendor fetch failed, falling back to StorageManager:', e);
-        if (isMountedRef.current) {
-          setVendors(StorageManager.getVendors());
-        }
+        console.warn('[Boot] Vendor fetch failed, using seed fallback:', e);
+        if (isMountedRef.current) setVendors(StorageManager.getVendors());
         vendorFetchComplete = true;
         checkHydrationComplete();
       });
 
-    // Also run non-vendor Supabase sync (products, reviews, etc.) in background
-    StorageManager.initFirestoreSync(() => {
-      if (isMountedRef.current) {
-        setProducts(StorageManager.getProducts());
-        setReviews(StorageManager.getReviews());
-        setEnquiries(StorageManager.getEnquiries());
-        setBanners(StorageManager.getBanners());
-      }
+    // 2. Fetch all non-vendor data from Supabase in parallel
+    fetchNonVendorData()
+      .then((d) => {
+        if (!isMountedRef.current) return;
+        setProducts(d.products);
+        setReviews(d.reviews);
+        setEnquiries(d.enquiries);
+        setBanners(d.banners);
+        setPromotions(d.promotions);
+        setAdminSettings(d.settings);
+        setFavorites(StorageManager.getFavorites());
+        dataFetchComplete = true;
+        checkHydrationComplete();
+      })
+      .catch((e) => {
+        console.warn('[Boot] Non-vendor data fetch failed:', e);
+        // Fall back to seed data rather than empty arrays
+        setProducts([]); setReviews([]); setEnquiries([]);
+        setBanners([]); setPromotions([]); setAdminSettings(DEFAULT_ADMIN_SETTINGS);
+        setFavorites(StorageManager.getFavorites());
+        dataFetchComplete = true;
+        checkHydrationComplete();
+      });
+
+    // 3. Run Supabase table seeding / realtime setup in background
+    StorageManager.initFirestoreSync(async () => {
+      // initFirestoreSync calls this when it detects empty tables and seeds them.
+      // Re-fetch fresh data after seeding so UI reflects seeded rows.
+      if (!isMountedRef.current) return;
+      const d = await fetchNonVendorData().catch(() => null);
+      if (!d || !isMountedRef.current) return;
+      setProducts(d.products);
+      setReviews(d.reviews);
+      setEnquiries(d.enquiries);
+      setBanners(d.banners);
+      setPromotions(d.promotions);
+      setAdminSettings(d.settings);
     }).catch((e) => console.warn('[initFirestoreSync] Warning:', e));
 
-    // ── Realtime vendor subscription ──────────────────────────────────────
-    // This handles updates from OTHER connected clients (e.g. admin approving
-    // a vendor on a different browser tab or device).
-    // The registering user's own session is handled by StorageManager.onVendorChange
-    // (registered in the effect above), which fires immediately after the INSERT
-    // is confirmed — without any replication lag.
+    // 4. Realtime vendor subscription
     let realtimeChannel: any = null;
-
     if (supabase) {
       realtimeChannel = supabase
         .channel('context:vendors:realtime')
@@ -457,31 +487,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           { event: '*', schema: 'public', table: 'vendors' },
           async (payload: any) => {
             if (!isMountedRef.current) return;
-
             if (payload.eventType === 'INSERT' && payload.new?.id) {
-              // Merge in the new vendor — deduplicate in case onVendorChange
-              // already added it via the direct SELECT after INSERT.
               const newVendor = rowToVendor(payload.new);
-              setVendors((prev) => {
-                if (prev.some((v) => v.id === newVendor.id)) return prev;
-                return [newVendor, ...prev];
-              });
-
+              setVendors((prev) => prev.some((v) => v.id === newVendor.id) ? prev : [newVendor, ...prev]);
             } else if (payload.eventType === 'UPDATE' && payload.new?.id) {
               const updatedVendor = rowToVendor(payload.new);
-              setVendors((prev) =>
-                prev.map((v) => v.id === updatedVendor.id ? updatedVendor : v)
-              );
-
+              setVendors((prev) => prev.map((v) => v.id === updatedVendor.id ? updatedVendor : v));
             } else if (payload.eventType === 'DELETE' && payload.old?.id) {
               setVendors((prev) => prev.filter((v) => v.id !== payload.old.id));
-
             } else {
-              // Fallback: full re-fetch for any other event type
               const fresh = await fetchVendorsFromSupabase();
-              if (isMountedRef.current && fresh.length > 0) {
-                setVendors(fresh);
-              }
+              if (isMountedRef.current && fresh.length > 0) setVendors(fresh);
             }
           }
         )
@@ -490,7 +506,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
     }
 
-    // ── Auth session restoration ───────────────────────────────────────────
+    // 5. Auth session restoration
     let authSubscription: { unsubscribe: () => void } | null = null;
 
     if (supabase) {
@@ -508,26 +524,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch((e) => {
           console.warn('[Boot Auth Error]:', e);
-          if (isMountedRef.current) {
-            authComplete = true;
-            checkHydrationComplete();
-          }
+          if (isMountedRef.current) { authComplete = true; checkHydrationComplete(); }
         });
 
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!isMountedRef.current) return;
-
         if (event === 'PASSWORD_RECOVERY') {
           setCurrentPageState('reset-password');
           showToast('info', 'Reset Password', 'Verification code confirmed. Please set your new password below.');
           return;
         }
-
-        if (event === 'SIGNED_OUT') {
-          setCurrentUser(null);
-          return;
-        }
-
+        if (event === 'SIGNED_OUT') { setCurrentUser(null); return; }
         if (session?.user) {
           const syncedUser = await resolveUserFromSupabase(session.user);
           if (isMountedRef.current) setCurrentUser(syncedUser);
@@ -540,6 +547,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else {
       authComplete = true;
       vendorFetchComplete = true;
+      dataFetchComplete = true;
       checkHydrationComplete();
     }
 
@@ -547,9 +555,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMountedRef.current = false;
       clearTimeout(fallbackTimer);
       if (authSubscription) authSubscription.unsubscribe();
-      if (realtimeChannel && supabase) {
-        supabase.removeChannel(realtimeChannel);
-      }
+      if (realtimeChannel && supabase) supabase.removeChannel(realtimeChannel);
     };
   }, []);
 
@@ -593,7 +599,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // ── Derived state ─────────────────────────────────────────────────────────
-  // activeVendor is derived from vendors state (already fetched from Supabase)
   const activeVendor = currentUser
     ? vendors.find(
         (v) =>
@@ -609,10 +614,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveVendorSlug(slug);
     setCurrentPageState('store');
     updateUrlAndStorage('store', slug);
-    StorageManager.incrementVendorTap(
-      vendors.find((v) => v.slug.toLowerCase() === slug.toLowerCase())?.id || '',
-      'profile'
-    );
+    const vendorId = vendors.find((v) => v.slug.toLowerCase() === slug.toLowerCase())?.id || '';
+    if (vendorId) StorageManager.incrementVendorTap(vendorId, 'profile');
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -638,73 +641,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ── Admin vendor actions ──────────────────────────────────────────────────
-  // These write directly to Supabase. StorageManager.updateVendorAsync now calls
-  // refreshVendorsAsync() after each write, which triggers onVendorChange above,
-  // which re-fetches from Supabase and updates React state immediately.
-  // The realtime channel also fires for other connected clients as a secondary path.
-
   const approveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-
     const updatedVendor: Vendor = {
       ...v,
       status: 'approved',
       isLive: true,
       approvedAt: v.approvedAt || new Date().toISOString(),
     };
-
     await StorageManager.updateVendorAsync(updatedVendor);
-
     const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
     await ApiService.sendWhatsAppNotification(v.whatsapp, message);
-
     showToast('success', 'Vendor Approved', `"${v.businessName}" is now live and public.`);
   };
 
   const unapproveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-
-    const updatedVendor: Vendor = { ...v, status: 'pending', isLive: false };
-    await StorageManager.updateVendorAsync(updatedVendor);
-
+    await StorageManager.updateVendorAsync({ ...v, status: 'pending', isLive: false });
     showToast('info', 'Vendor Unapproved', `"${v.businessName}" status set to pending.`);
   };
 
   const toggleVendorApproval = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-    if (v.isLive || v.status === 'approved') {
-      await unapproveVendor(vendorId);
-    } else {
-      await approveVendor(vendorId);
-    }
+    if (v.isLive || v.status === 'approved') await unapproveVendor(vendorId);
+    else await approveVendor(vendorId);
   };
 
   const toggleVendorVerification = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-
     const currentStatus = Boolean(v.ninVerified || v.nin_verified);
     const newStatus = !currentStatus;
-
-    const updatedVendor: Vendor = {
+    await StorageManager.updateVendorAsync({
       ...v,
       ninVerified: newStatus,
       nin_verified: newStatus,
       ninData: newStatus
-        ? (v.ninData || {
-            nin: '11111111111',
-            fullName: v.ownerName,
-            dob: '1990-01-01',
-            verifiedAt: new Date().toISOString(),
-          })
+        ? (v.ninData || { nin: '11111111111', fullName: v.ownerName, dob: '1990-01-01', verifiedAt: new Date().toISOString() })
         : v.ninData,
-    };
-
-    await StorageManager.updateVendorAsync(updatedVendor);
-
+    });
     showToast(
       newStatus ? 'success' : 'info',
       newStatus ? 'Vendor Verified' : 'Verification Removed',
@@ -715,19 +693,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleVendorFeatured = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-
-    const currentFeatured = Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
-    const newFeatured = !currentFeatured;
-
-    const updatedVendor: Vendor = {
+    const newFeatured = !Boolean(v.isFeatured ?? v.is_featured ?? v.featuredOnHomepage);
+    await StorageManager.updateVendorAsync({
       ...v,
       isFeatured: newFeatured,
       is_featured: newFeatured,
       featuredOnHomepage: newFeatured,
-    };
-
-    await StorageManager.updateVendorAsync(updatedVendor);
-
+    });
     showToast(
       newFeatured ? 'success' : 'info',
       newFeatured ? 'Vendor Featured' : 'Removed from Featured',
@@ -738,13 +710,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const rejectVendor = async (vendorId: string, reason: string) => {
     const v = vendors.find((item) => item.id === vendorId);
     if (!v) return;
-
-    const updatedVendor: Vendor = { ...v, status: 'rejected', isLive: false };
-    await StorageManager.updateVendorAsync(updatedVendor);
-
+    await StorageManager.updateVendorAsync({ ...v, status: 'rejected', isLive: false });
     const message = `Hello ${v.ownerName}, your application for "${v.businessName}" on IkoroduSquare requires changes. Reason: ${reason}. Please update your profile in your dashboard.`;
     await ApiService.sendWhatsAppNotification(v.whatsapp, message);
-
     showToast('info', 'Vendor Application Rejected', `Rejection notice sent via WhatsApp to ${v.businessName}.`);
   };
 
@@ -758,54 +726,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
-        currentPage,
-        setCurrentPage,
-        activeVendorSlug,
-        setActiveVendorSlug,
+        currentPage, setCurrentPage,
+        activeVendorSlug, setActiveVendorSlug,
         navigateToStore,
-        currentUser,
-        setCurrentUser,
+        currentUser, setCurrentUser,
         activeVendor,
-        vendors,
-        products,
-        reviews,
-        enquiries,
-        banners,
-        favorites,
-        promotions,
-        adminSettings,
-        updateAdminSettings,
+        vendors, products, reviews, enquiries, banners, favorites, promotions,
+        adminSettings, updateAdminSettings,
         isLoading,
-        searchType,
-        setSearchType,
-        searchQuery,
-        setSearchQuery,
-        selectedCategory,
-        setSelectedCategory,
-        selectedArea,
-        setSelectedArea,
+        searchType, setSearchType,
+        searchQuery, setSearchQuery,
+        selectedCategory, setSelectedCategory,
+        selectedArea, setSelectedArea,
         refreshData,
         toggleFavorite,
-        showToast,
-        toasts,
-        removeToast,
-        createPromotionRequest,
-        activatePromotion,
-        updatePromotionStatus,
-        approveVendor,
-        unapproveVendor,
-        toggleVendorApproval,
-        toggleVendorVerification,
-        toggleVendorFeatured,
-        rejectVendor,
-        deleteVendor,
-        showSetupModal,
-        setShowSetupModal,
-        isAdminMode,
-        setIsAdminMode,
-        language,
-        setLanguage,
-        t,
+        showToast, toasts, removeToast,
+        createPromotionRequest, activatePromotion, updatePromotionStatus,
+        approveVendor, unapproveVendor, toggleVendorApproval,
+        toggleVendorVerification, toggleVendorFeatured,
+        rejectVendor, deleteVendor,
+        showSetupModal, setShowSetupModal,
+        isAdminMode, setIsAdminMode,
+        language, setLanguage, t,
       }}
     >
       {children}
