@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { StorageManager } from '../data/mockStorage';
 import { ALL_IKORODU_AREAS } from '../data/ikoroduData';
@@ -12,8 +12,113 @@ import {
   Package, TrendingUp, MessageCircle, Sparkles, Award, AlertCircle,
   ExternalLink, Eye, Trash2, MapPin, Search, X, Star, LogOut,
   Settings, Layers, ShoppingBag, Tag, Activity, RefreshCw, Zap,
-  LayoutTemplate, Check,
+  LayoutTemplate,
 } from 'lucide-react';
+
+// ── Promo type config ─────────────────────────────────────────────────────
+const PROMO_CONFIG = {
+  featured_product:  { label: 'Feat. Product',  labelFull: 'Featured Product',       price: 5000,  Icon: Zap,           activeClass: 'bg-amber-500 text-slate-950 border-amber-600',    inactiveClass: 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50' },
+  sponsored_vendor:  { label: 'Sponsored',       labelFull: 'Sponsored Vendor Slot',  price: 10000, Icon: Sparkles,      activeClass: 'bg-purple-600 text-white border-purple-700',        inactiveClass: 'bg-white text-purple-800 border-purple-300 hover:bg-purple-50' },
+  category_top_spot: { label: 'Cat. Top Spot',   labelFull: 'Category Top Spot',      price: 7500,  Icon: Award,         activeClass: 'bg-blue-600 text-white border-blue-700',            inactiveClass: 'bg-white text-blue-800 border-blue-300 hover:bg-blue-50' },
+  homepage_banner:   { label: 'Banner',           labelFull: 'Homepage Banner Slot',   price: 15000, Icon: LayoutTemplate, activeClass: 'bg-emerald-600 text-white border-emerald-700',     inactiveClass: 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50' },
+} as const;
+
+type PromoType = keyof typeof PROMO_CONFIG;
+
+// ── PromoButton — self-contained with optimistic state ────────────────────
+interface PromoButtonProps {
+  vendor: Vendor;
+  promoType: PromoType;
+  isActive: boolean;
+  onToggle: (vendor: Vendor, promoType: PromoType, currentlyActive: boolean) => Promise<void>;
+}
+
+const PromoButton: React.FC<PromoButtonProps> = ({ vendor, promoType, isActive, onToggle }) => {
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(false);
+  const config = PROMO_CONFIG[promoType];
+  const Icon   = config.Icon;
+
+  // Sync optimistic state whenever real state changes from parent
+  useEffect(() => { setOptimistic(null); }, [isActive]);
+
+  // What the button currently shows — optimistic wins until parent syncs
+  const displayed = optimistic !== null ? optimistic : isActive;
+
+  const handleClick = async () => {
+    if (loading) return;
+    setLoading(true);
+    setOptimistic(!displayed); // flip immediately
+    try {
+      await onToggle(vendor, promoType, displayed);
+    } catch {
+      setOptimistic(displayed); // revert on error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className={`px-2.5 py-1.5 rounded-xl border-2 font-extrabold transition-all cursor-pointer flex items-center gap-1 text-xs disabled:opacity-60 disabled:cursor-not-allowed ${
+        displayed ? config.activeClass : config.inactiveClass
+      }`}
+      title={displayed ? `Click to deactivate ${config.labelFull}` : `Click to activate ${config.labelFull}`}
+    >
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      <span>{config.label}</span>
+      {displayed && <span className="text-[10px] font-black">✓</span>}
+      {loading && <span className="animate-spin text-[10px]">⟳</span>}
+    </button>
+  );
+};
+
+// ── StatusToggleButton — for Approve / Verify / Feature ───────────────────
+interface StatusToggleProps {
+  isActive: boolean;
+  activeLabel: string;
+  inactiveLabel: string;
+  activeClass: string;
+  inactiveClass: string;
+  icon: React.ReactNode;
+  onClick: () => Promise<void>;
+}
+
+const StatusToggleButton: React.FC<StatusToggleProps> = ({
+  isActive, activeLabel, inactiveLabel, activeClass, inactiveClass, icon, onClick
+}) => {
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { setOptimistic(null); }, [isActive]);
+
+  const displayed = optimistic !== null ? optimistic : isActive;
+
+  const handleClick = async () => {
+    if (loading) return;
+    setLoading(true);
+    setOptimistic(!displayed);
+    try { await onClick(); }
+    catch { setOptimistic(displayed); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className={`px-2.5 py-1.5 rounded-xl border-2 font-extrabold transition-all cursor-pointer flex items-center gap-1 text-xs disabled:opacity-60 disabled:cursor-not-allowed ${
+        displayed ? activeClass : inactiveClass
+      }`}
+    >
+      {icon}
+      <span>{displayed ? activeLabel : inactiveLabel}</span>
+      {loading && <span className="animate-spin text-[10px] ml-0.5">⟳</span>}
+    </button>
+  );
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AdminDashboard
@@ -47,7 +152,7 @@ export const AdminDashboard: React.FC = () => {
   }, [adminSettings]);
 
   // ── Tab routing ───────────────────────────────────────────────────────────
-  const getInitialAdminTab = (): string => {
+  const getInitialTab = (): string => {
     if (typeof window === 'undefined') return 'approvals';
     const path = window.location.pathname.toLowerCase();
     if (path.includes('/vendors'))     return 'featured';
@@ -63,7 +168,7 @@ export const AdminDashboard: React.FC = () => {
     return 'approvals';
   };
 
-  const [activeTab, setActiveTabState] = useState<string>(getInitialAdminTab());
+  const [activeTab, setActiveTabState] = useState<string>(getInitialTab());
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
     if (typeof window !== 'undefined') window.history.pushState({}, '', `/admin/${tab}`);
@@ -80,19 +185,14 @@ export const AdminDashboard: React.FC = () => {
   const [statusFilter,      setStatusFilter]      = useState<'all' | 'pending' | 'approved' | 'rejected' | 'featured' | 'verified'>('all');
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  const pendingVendors  = useMemo(() => vendors.filter((v) => v.status === 'pending'), [vendors]);
+  const pendingVendors  = useMemo(() => vendors.filter((v) => v.status === 'pending'),  [vendors]);
   const approvedVendors = useMemo(() => vendors.filter((v) => v.status === 'approved'), [vendors]);
 
-  const selectedVendorForDetails = useMemo(
-    () => vendors.find((v) => v.id === selectedVendorId) ?? null,
-    [vendors, selectedVendorId]
-  );
-  const vendorToDelete = useMemo(
-    () => vendors.find((v) => v.id === vendorToDeleteId) ?? null,
-    [vendors, vendorToDeleteId]
-  );
+  const selectedVendorForDetails = useMemo(() => vendors.find((v) => v.id === selectedVendorId) ?? null, [vendors, selectedVendorId]);
+  const vendorToDelete           = useMemo(() => vendors.find((v) => v.id === vendorToDeleteId) ?? null, [vendors, vendorToDeleteId]);
 
-  // Active promo types per vendor
+  // Active promo types per vendor — derived from promotions state
+  // PromoButton has its own optimistic state so it flips instantly without waiting for this
   const vendorActivePromos = useMemo(() => {
     const map: Record<string, Set<string>> = {};
     for (const p of promotions || []) {
@@ -106,11 +206,12 @@ export const AdminDashboard: React.FC = () => {
 
   const filteredVendors = useMemo(() => {
     return vendors.filter((v) => {
+      const q = searchQuery.toLowerCase();
       const matchesSearch =
-        v.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        v.ownerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        v.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        v.area.toLowerCase().includes(searchQuery.toLowerCase());
+        v.businessName.toLowerCase().includes(q) ||
+        v.ownerName.toLowerCase().includes(q) ||
+        v.subCategory.toLowerCase().includes(q) ||
+        v.area.toLowerCase().includes(q);
       if (!matchesSearch) return false;
       if (statusFilter === 'pending')  return v.status === 'pending' || !v.isLive;
       if (statusFilter === 'approved') return v.status === 'approved' || v.isLive;
@@ -148,10 +249,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
           <div className="pt-2 flex flex-col gap-2.5">
             <button onClick={() => setCurrentPage('home')} className="w-full bg-slate-950 hover:bg-slate-900 text-white font-bold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer">Return to Marketplace Home</button>
-            <button
-              onClick={async () => { await logoutUser(); setCurrentUser(null); StorageManager.setCurrentUser(null); setCurrentPage('admin'); }}
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer"
-            >Sign In as Administrator</button>
+            <button onClick={async () => { await logoutUser(); setCurrentUser(null); StorageManager.setCurrentUser(null); setCurrentPage('admin'); }} className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs transition shadow-md cursor-pointer">Sign In as Administrator</button>
           </div>
         </div>
       </div>
@@ -183,69 +281,53 @@ export const AdminDashboard: React.FC = () => {
     showToast('info', 'Product Removed', 'The item has been deleted from the marketplace catalogue.');
   };
 
-  // ── Direct promo activate — no modal, fires immediately ──────────────────
-  const handleDirectActivatePromo = async (vendor: Vendor, promoType: string) => {
-    const PROMO_PRICES: Record<string, number> = {
-      featured_product: 5000,
-      sponsored_vendor: 10000,
-      category_top_spot: 7500,
-      homepage_banner: 15000,
-    };
-    const PROMO_LABELS: Record<string, string> = {
-      featured_product:  'Featured Product',
-      sponsored_vendor:  'Sponsored Vendor Slot',
-      category_top_spot: 'Category Top Spot',
-      homepage_banner:   'Homepage Banner Slot',
-    };
+  // ── Promo toggle handler — passed to PromoButton ──────────────────────────
+  // PromoButton handles optimistic flip locally; this fires the real Supabase write
+  const handlePromoToggle = async (vendor: Vendor, promoType: PromoType, currentlyActive: boolean) => {
+    const config = PROMO_CONFIG[promoType];
 
-    const activeTypes = vendorActivePromos[vendor.id] || new Set();
-
-    // If already active — deactivate it
-    if (activeTypes.has(promoType)) {
+    if (currentlyActive) {
+      // Find the active promo and deactivate it
       const existing = (promotions || []).find(
         (p) => p.vendorId === vendor.id && p.promotionType === promoType && p.status === 'active'
       );
       if (existing) {
         await updatePromotionStatus(existing.id, 'expired');
-        showToast('info', 'Promotion Deactivated', `${PROMO_LABELS[promoType]} removed for ${vendor.businessName}.`);
+        showToast('info', 'Promotion Deactivated', `${config.labelFull} removed for ${vendor.businessName}.`);
       }
-      return;
-    }
-
-    // Activate immediately
-    const promo: Promotion = {
-      id: `promo-admin-${Date.now()}`,
-      vendorId: vendor.id,
-      vendorName: vendor.businessName,
-      vendorSlug: vendor.slug,
-      promotionType: promoType as any,
-      promotionName: `${PROMO_LABELS[promoType]} — ${vendor.businessName}`,
-      amount: PROMO_PRICES[promoType] || 0,
-      reference: `ADM-${Date.now()}`,
-      status: 'active',
-      startDate: new Date().toISOString(),
-      expiryDate: new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
-      paymentDate: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      ...(promoType === 'homepage_banner' && {
-        bannerData: {
-          title: `${vendor.businessName} — Special Offer`,
-          subtitle: 'Top verified vendor in Ikorodu.',
-          ctaText: 'Visit Shop',
-          imageURL: vendor.coverPhotoURL || vendor.logoURL || '',
-        },
-      }),
-    };
-
-    try {
+    } else {
+      // Activate immediately
+      const promo: Promotion = {
+        id:            `promo-admin-${Date.now()}`,
+        vendorId:      vendor.id,
+        vendorName:    vendor.businessName,
+        vendorSlug:    vendor.slug,
+        promotionType: promoType,
+        promotionName: `${config.labelFull} — ${vendor.businessName}`,
+        amount:        config.price,
+        reference:     `ADM-${Date.now()}`,
+        status:        'active',
+        startDate:     new Date().toISOString(),
+        expiryDate:    new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
+        paymentDate:   new Date().toISOString(),
+        createdAt:     new Date().toISOString(),
+        ...(promoType === 'homepage_banner' && {
+          bannerData: {
+            title:    `${vendor.businessName} — Special Offer`,
+            subtitle: 'Top verified vendor in Ikorodu.',
+            ctaText:  'Visit Shop & Chat',
+            imageURL: vendor.coverPhotoURL || vendor.logoURL || '',
+          },
+        }),
+      };
       await activatePromotion(promo);
-      showToast('success', 'Promotion Activated!', `${PROMO_LABELS[promoType]} is now live for ${vendor.businessName}.`);
-    } catch (e) {
-      showToast('error', 'Activation Failed', 'Could not activate the promotion. Please try again.');
+      showToast('success', 'Promotion Activated!', `${config.labelFull} is now live for ${vendor.businessName}.`);
     }
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-100 py-8 px-4 sm:px-6 lg:px-8 space-y-8 max-w-7xl mx-auto">
 
@@ -287,12 +369,8 @@ export const AdminDashboard: React.FC = () => {
           { id: 'settings',    label: 'Settings',                                   icon: <Settings className="w-4 h-4" /> },
           { id: 'system-logs', label: 'Audit Logs',                                 icon: <Activity className="w-4 h-4" /> },
         ].map(({ id, label, icon }) => (
-          <button
-            key={id} onClick={() => setActiveTab(id)}
-            className={`pb-3 px-3 transition flex items-center gap-1.5 border-b-2 whitespace-nowrap cursor-pointer ${
-              activeTab === id ? 'border-amber-600 text-amber-700 font-black' : 'border-transparent text-slate-600 hover:text-slate-900'
-            }`}
-          >
+          <button key={id} onClick={() => setActiveTab(id)}
+            className={`pb-3 px-3 transition flex items-center gap-1.5 border-b-2 whitespace-nowrap cursor-pointer ${activeTab === id ? 'border-amber-600 text-amber-700 font-black' : 'border-transparent text-slate-600 hover:text-slate-900'}`}>
             {icon} {label}
           </button>
         ))}
@@ -304,7 +382,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-extrabold text-lg text-slate-900">Pending Vendor Registrations</h3>
-              <p className="text-xs text-slate-500">Inspect registered business details before approving or rejecting.</p>
+              <p className="text-xs text-slate-500">Inspect registered business details before approving or rejecting. Updates in real-time.</p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => refreshData()} className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer">
@@ -320,9 +398,7 @@ export const AdminDashboard: React.FC = () => {
               >
                 <RefreshCw className="w-3.5 h-3.5 text-slate-500" /> Scan & Repair
               </button>
-              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                {pendingVendors.length} Awaiting Review
-              </span>
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">{pendingVendors.length} Awaiting Review</span>
             </div>
           </div>
 
@@ -330,7 +406,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
               <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
               <h4 className="font-bold text-base text-slate-900">All Applications Processed!</h4>
-              <p className="text-xs text-slate-500">No pending vendor registrations.</p>
+              <p className="text-xs text-slate-500">No pending vendor registrations. New registrations appear here automatically.</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -365,20 +441,14 @@ export const AdminDashboard: React.FC = () => {
                         <MessageCircle className="w-3.5 h-3.5 text-emerald-600" /> {vendor.whatsapp}
                       </a>
                     </div>
-                    <div>
-                      <span className="text-slate-500 block text-[10px]">Email:</span>
-                      <span className="font-bold text-slate-800">{vendor.email || '—'}</span>
-                    </div>
+                    <div><span className="text-slate-500 block text-[10px]">Email:</span><span className="font-bold text-slate-800">{vendor.email || '—'}</span></div>
                     <div>
                       <span className="text-slate-500 block text-[10px]">NIN:</span>
                       {vendor.ninVerified
                         ? <span className="font-bold text-emerald-700 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Verified</span>
                         : <span className="font-bold text-amber-700 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Unverified</span>}
                     </div>
-                    <div>
-                      <span className="text-slate-500 block text-[10px]">Registered:</span>
-                      <span className="font-medium text-slate-700">{new Date(vendor.createdAt).toLocaleDateString()}</span>
-                    </div>
+                    <div><span className="text-slate-500 block text-[10px]">Registered:</span><span className="font-medium text-slate-700">{new Date(vendor.createdAt).toLocaleDateString()}</span></div>
                   </div>
                 </div>
               ))}
@@ -393,7 +463,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <h3 className="font-extrabold text-lg text-slate-900">Vendor Directory & Promotions</h3>
-              <p className="text-xs text-slate-500">Manage approvals, verifications, and click any promotion button to instantly activate or deactivate it on the homepage.</p>
+              <p className="text-xs text-slate-500">Click any coloured paid-ad button to instantly activate it on the homepage. Click again to deactivate.</p>
             </div>
             <div className="relative w-full lg:w-72">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -413,16 +483,17 @@ export const AdminDashboard: React.FC = () => {
               { id: 'verified', label: `Verified (${vendors.filter((v) => v.ninVerified || v.nin_verified).length})` },
             ].map(({ id, label }) => (
               <button key={id} onClick={() => setStatusFilter(id as any)}
-                className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl border-2 transition cursor-pointer font-extrabold ${
                   statusFilter === id
-                    ? id === 'approved' ? 'bg-emerald-600 text-white border-emerald-600'
-                    : id === 'pending'  ? 'bg-amber-500 text-slate-950 border-amber-500'
-                    : id === 'featured' ? 'bg-purple-600 text-white border-purple-600'
-                    : id === 'verified' ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >{label}</button>
+                    ? id === 'approved' ? 'bg-emerald-600 text-white border-emerald-700'
+                    : id === 'pending'  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                    : id === 'featured' ? 'bg-purple-600 text-white border-purple-700'
+                    : id === 'verified' ? 'bg-blue-600 text-white border-blue-700'
+                    : 'bg-slate-900 text-white border-slate-950'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}>
+                {label}
+              </button>
             ))}
           </div>
 
@@ -435,11 +506,12 @@ export const AdminDashboard: React.FC = () => {
                 const isLive     = vendor.isLive || vendor.status === 'approved';
                 const isVerified = Boolean(vendor.ninVerified || vendor.nin_verified);
                 const isFeatured = Boolean(vendor.isFeatured ?? vendor.is_featured ?? vendor.featuredOnHomepage);
-                const activeTypes = vendorActivePromos[vendor.id] || new Set();
+                const activeTypes = vendorActivePromos[vendor.id] || new Set<string>();
 
                 return (
-                  <div key={vendor.id} className="bg-white border border-slate-200 rounded-2xl p-4 hover:border-slate-300 transition space-y-3">
-                    {/* Row 1: vendor info + status badges */}
+                  <div key={vendor.id} className="bg-white border-2 border-slate-200 rounded-2xl p-4 hover:border-slate-300 transition space-y-3">
+
+                    {/* Row 1: Identity + quick actions */}
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <img src={vendor.logoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'} alt={vendor.businessName} className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0" />
@@ -457,7 +529,6 @@ export const AdminDashboard: React.FC = () => {
                           <p className="text-[11px] text-slate-500 mt-0.5 truncate">📍 {vendor.area} • {vendor.subCategory} • {vendor.ownerName}</p>
                         </div>
                       </div>
-                      {/* Actions: view, visit, delete */}
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button onClick={() => setSelectedVendorId(vendor.id)} className="px-2.5 py-1.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer text-xs">
                           <Eye className="w-3.5 h-3.5 text-amber-400" /> Info
@@ -471,91 +542,54 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Row 2: Status toggles */}
+                    {/* Row 2: Status toggles (Approve / Verify / Feature) */}
                     <div className="flex items-center gap-2 flex-wrap border-t border-slate-100 pt-2.5">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Status:</span>
-                      <button
+
+                      <StatusToggleButton
+                        isActive={isLive}
+                        activeLabel="Live"
+                        inactiveLabel="Approve"
+                        activeClass="bg-emerald-600 text-white border-emerald-700"
+                        inactiveClass="bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-400"
+                        icon={isLive ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
                         onClick={() => toggleVendorApproval(vendor.id)}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${isLive ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'}`}
-                      >
-                        {isLive ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5 text-slate-400" />}
-                        {isLive ? 'Live' : 'Approve'}
-                      </button>
-                      <button
+                      />
+
+                      <StatusToggleButton
+                        isActive={isVerified}
+                        activeLabel="Verified"
+                        inactiveLabel="Verify NIN"
+                        activeClass="bg-blue-600 text-white border-blue-700"
+                        inactiveClass="bg-white text-slate-700 border-slate-300 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-400"
+                        icon={<ShieldCheck className="w-3.5 h-3.5" />}
                         onClick={() => toggleVendorVerification(vendor.id)}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${isVerified ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700'}`}
-                      >
-                        <ShieldCheck className={`w-3.5 h-3.5 ${isVerified ? 'text-white' : 'text-slate-400'}`} />
-                        {isVerified ? 'Verified' : 'Verify NIN'}
-                      </button>
-                      <button
+                      />
+
+                      <StatusToggleButton
+                        isActive={isFeatured}
+                        activeLabel="Featured ★"
+                        inactiveLabel="Feature"
+                        activeClass="bg-purple-600 text-white border-purple-700"
+                        inactiveClass="bg-white text-slate-700 border-slate-300 hover:bg-purple-50 hover:text-purple-700 hover:border-purple-400"
+                        icon={<Star className="w-3.5 h-3.5" />}
                         onClick={() => toggleVendorFeatured(vendor.id)}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${isFeatured ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700'}`}
-                      >
-                        <Star className={`w-3.5 h-3.5 ${isFeatured ? 'fill-white text-white' : 'text-slate-400'}`} />
-                        {isFeatured ? 'Featured' : 'Feature'}
-                      </button>
+                      />
                     </div>
 
-                    {/* Row 3: Paid promotion slots — click to toggle on/off, reflects on homepage immediately */}
+                    {/* Row 3: Paid promotion slots */}
                     <div className="flex items-center gap-2 flex-wrap border-t border-slate-100 pt-2.5">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Paid Ads:</span>
 
-                      {/* Featured Product */}
-                      <button
-                        onClick={() => handleDirectActivatePromo(vendor, 'featured_product')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
-                          activeTypes.has('featured_product')
-                            ? 'bg-amber-500 text-slate-950 border-amber-500 hover:bg-amber-600'
-                            : 'bg-slate-50 text-amber-800 border-amber-200 hover:bg-amber-50'
-                        }`}
-                        title={activeTypes.has('featured_product') ? 'Click to deactivate' : 'Click to activate Featured Product'}
-                      >
-                        <Zap className={`w-3.5 h-3.5 ${activeTypes.has('featured_product') ? 'text-slate-950' : 'text-amber-600'}`} />
-                        {activeTypes.has('featured_product') ? 'Feat. Product ✓' : 'Feat. Product'}
-                      </button>
-
-                      {/* Sponsored Vendor */}
-                      <button
-                        onClick={() => handleDirectActivatePromo(vendor, 'sponsored_vendor')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
-                          activeTypes.has('sponsored_vendor')
-                            ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
-                            : 'bg-slate-50 text-purple-800 border-purple-200 hover:bg-purple-50'
-                        }`}
-                        title={activeTypes.has('sponsored_vendor') ? 'Click to deactivate' : 'Click to activate Sponsored Vendor'}
-                      >
-                        <Sparkles className={`w-3.5 h-3.5 ${activeTypes.has('sponsored_vendor') ? 'text-white' : 'text-purple-600'}`} />
-                        {activeTypes.has('sponsored_vendor') ? 'Sponsored ✓' : 'Sponsored'}
-                      </button>
-
-                      {/* Category Top Spot */}
-                      <button
-                        onClick={() => handleDirectActivatePromo(vendor, 'category_top_spot')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
-                          activeTypes.has('category_top_spot')
-                            ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                            : 'bg-slate-50 text-blue-800 border-blue-200 hover:bg-blue-50'
-                        }`}
-                        title={activeTypes.has('category_top_spot') ? 'Click to deactivate' : 'Click to activate Category Top Spot'}
-                      >
-                        <Award className={`w-3.5 h-3.5 ${activeTypes.has('category_top_spot') ? 'text-white' : 'text-blue-600'}`} />
-                        {activeTypes.has('category_top_spot') ? 'Cat. Top Spot ✓' : 'Cat. Top Spot'}
-                      </button>
-
-                      {/* Homepage Banner */}
-                      <button
-                        onClick={() => handleDirectActivatePromo(vendor, 'homepage_banner')}
-                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 text-xs ${
-                          activeTypes.has('homepage_banner')
-                            ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                            : 'bg-slate-50 text-emerald-800 border-emerald-200 hover:bg-emerald-50'
-                        }`}
-                        title={activeTypes.has('homepage_banner') ? 'Click to deactivate' : 'Click to activate Homepage Banner'}
-                      >
-                        <LayoutTemplate className={`w-3.5 h-3.5 ${activeTypes.has('homepage_banner') ? 'text-white' : 'text-emerald-600'}`} />
-                        {activeTypes.has('homepage_banner') ? 'Banner ✓' : 'Banner'}
-                      </button>
+                      {(Object.keys(PROMO_CONFIG) as PromoType[]).map((promoType) => (
+                        <PromoButton
+                          key={promoType}
+                          vendor={vendor}
+                          promoType={promoType}
+                          isActive={activeTypes.has(promoType)}
+                          onToggle={handlePromoToggle}
+                        />
+                      ))}
                     </div>
                   </div>
                 );
@@ -569,10 +603,10 @@ export const AdminDashboard: React.FC = () => {
       {activeTab === 'analytics' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {[
-            { label: 'Total Vendors',         value: vendors.length,  sub: `${approvedVendors.length} Live Stores`,       color: 'text-slate-900' },
-            { label: 'Total Products',        value: products.length, sub: 'Indexed in Search',                          color: 'text-emerald-600' },
-            { label: 'Active Monthly Users',  value: '14,850+',       sub: `Across ${ALL_IKORODU_AREAS.length} Areas`,    color: 'text-slate-900' },
-            { label: 'WhatsApp Enquiries',    value: '24,500+',       sub: 'Direct Buyer Connections',                   color: 'text-amber-500' },
+            { label: 'Total Vendors',        value: vendors.length,  sub: `${approvedVendors.length} Live Stores`,       color: 'text-slate-900' },
+            { label: 'Total Products',       value: products.length, sub: 'Indexed in Search',                          color: 'text-emerald-600' },
+            { label: 'Active Monthly Users', value: '14,850+',       sub: `Across ${ALL_IKORODU_AREAS.length} Areas`,    color: 'text-slate-900' },
+            { label: 'WhatsApp Enquiries',   value: '24,500+',       sub: 'Direct Buyer Connections',                   color: 'text-amber-500' },
           ].map(({ label, value, sub, color }) => (
             <div key={label} className="bg-white p-6 rounded-3xl border border-slate-200 space-y-2 shadow-xs">
               <p className="text-xs font-bold text-slate-500">{label}</p>
@@ -634,7 +668,7 @@ export const AdminDashboard: React.FC = () => {
           <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
             <ShoppingBag className="w-10 h-10 text-emerald-600 mx-auto" />
             <h4 className="font-bold text-slate-900 text-sm">Direct Vendor Communications</h4>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">IkoroduSquare connects customers directly with vendors via WhatsApp checkout. Over 24,500 direct inquiries logged to date.</p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">IkoroduSquare connects customers directly with vendors via WhatsApp checkout.</p>
           </div>
         </div>
       )}
@@ -695,9 +729,9 @@ export const AdminDashboard: React.FC = () => {
             <h3 className="font-extrabold text-lg text-slate-900">Platform Security & Access</h3>
             <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
               {[
-                { label: 'Administrator Email', value: getAdminEmail(), color: 'text-orange-600 bg-orange-50 border-orange-200' },
-                { label: 'Vendor Data Source', value: 'Supabase (Direct) ✓', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-                { label: 'Admin Route Restriction', value: 'Single-Admin ACTIVE ✓', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+                { label: 'Administrator Email',    value: getAdminEmail(),           color: 'text-orange-600 bg-orange-50 border-orange-200' },
+                { label: 'Vendor Data Source',     value: 'Supabase (Direct) ✓',     color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+                { label: 'Admin Route Restriction',value: 'Single-Admin ACTIVE ✓',   color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="flex items-center justify-between pb-3 border-b border-slate-200 last:border-0 last:pb-0">
                   <span className="font-bold text-slate-700">{label}</span>
@@ -738,7 +772,7 @@ export const AdminDashboard: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5" /> Platform Revenue Engine
               </span>
               <h3 className="text-2xl sm:text-3xl font-black">Promotions Management</h3>
-              <p className="text-xs text-slate-400">Manage inbound promotion requests. To activate promotions, use the Vendors Directory tab — click any paid ad button to instantly toggle it on or off on the homepage.</p>
+              <p className="text-xs text-slate-400">To activate or deactivate promotions, go to the <strong className="text-amber-300">Vendors tab</strong> and click any paid-ad button — it reflects on the homepage instantly.</p>
             </div>
             <div className="bg-white/10 backdrop-blur-md p-5 rounded-2xl border border-white/15 text-right sm:min-w-[200px]">
               <p className="text-slate-300 font-bold text-xs uppercase tracking-wider">Total Ad Revenue</p>
@@ -790,11 +824,7 @@ export const AdminDashboard: React.FC = () => {
                           || (promoStatusFilter === 'pending_verification' && (p.status === 'pending_verification' || p.status === 'pending'))
                           || p.status === promoStatusFilter;
                         const q = promoSearchQuery.toLowerCase();
-                        const matchSearch = !q
-                          || p.vendorName?.toLowerCase().includes(q)
-                          || p.reference?.toLowerCase().includes(q)
-                          || p.promotionName?.toLowerCase().includes(q)
-                          || p.promotionType?.toLowerCase().includes(q);
+                        const matchSearch = !q || p.vendorName?.toLowerCase().includes(q) || p.reference?.toLowerCase().includes(q) || p.promotionName?.toLowerCase().includes(q) || p.promotionType?.toLowerCase().includes(q);
                         return matchStatus && matchSearch;
                       })
                       .map((promo) => {
@@ -819,12 +849,7 @@ export const AdminDashboard: React.FC = () => {
                               <p className="text-[10px] text-slate-500">{promo.status === 'active' ? `Expires: ${new Date(promo.expiryDate).toLocaleDateString()} (${daysLeft}d left)` : '—'}</p>
                             </td>
                             <td className="py-3.5 px-3">
-                              <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
-                                promo.status === 'active' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                                isPending ? 'bg-amber-100 text-amber-900 border border-amber-300' :
-                                promo.status === 'rejected' ? 'bg-rose-100 text-rose-800 border border-rose-300' :
-                                'bg-slate-200 text-slate-700'
-                              }`}>
+                              <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${promo.status === 'active' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : isPending ? 'bg-amber-100 text-amber-900 border border-amber-300' : promo.status === 'rejected' ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-slate-200 text-slate-700'}`}>
                                 {promo.status === 'active' ? 'Active' : isPending ? 'Pending' : promo.status === 'rejected' ? 'Rejected' : 'Expired'}
                               </span>
                             </td>
@@ -932,16 +957,31 @@ export const AdminDashboard: React.FC = () => {
                 <ExternalLink className="w-4 h-4" /> Preview Store
               </button>
               <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={() => toggleVendorApproval(selectedVendorForDetails.id)} className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'}`}>
-                  <CheckCircle2 className="w-4 h-4" /> {selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved' ? 'Approved (Live)' : 'Approve Store'}
-                </button>
-                <button onClick={() => toggleVendorVerification(selectedVendorForDetails.id)} className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-100 text-blue-900 hover:bg-blue-200'}`}>
-                  <ShieldCheck className="w-4 h-4" /> {selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified ? 'Verified ✓' : 'Verify NIN'}
-                </button>
-                <button onClick={() => toggleVendorFeatured(selectedVendorForDetails.id)} className={`font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer ${selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-100 text-purple-900 hover:bg-purple-200'}`}>
-                  <Star className="w-4 h-4" /> {selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'Featured ★' : 'Feature Vendor'}
-                </button>
-                <button onClick={() => setVendorToDeleteId(selectedVendorForDetails.id)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer">
+                <StatusToggleButton
+                  isActive={selectedVendorForDetails.isLive || selectedVendorForDetails.status === 'approved'}
+                  activeLabel="Approved (Live)" inactiveLabel="Approve Store"
+                  activeClass="bg-emerald-600 text-white border-emerald-700"
+                  inactiveClass="bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200"
+                  icon={<CheckCircle2 className="w-4 h-4" />}
+                  onClick={() => toggleVendorApproval(selectedVendorForDetails.id)}
+                />
+                <StatusToggleButton
+                  isActive={Boolean(selectedVendorForDetails.ninVerified || selectedVendorForDetails.nin_verified)}
+                  activeLabel="Verified ✓" inactiveLabel="Verify NIN"
+                  activeClass="bg-blue-600 text-white border-blue-700"
+                  inactiveClass="bg-blue-100 text-blue-900 border-blue-300 hover:bg-blue-200"
+                  icon={<ShieldCheck className="w-4 h-4" />}
+                  onClick={() => toggleVendorVerification(selectedVendorForDetails.id)}
+                />
+                <StatusToggleButton
+                  isActive={Boolean(selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage)}
+                  activeLabel="Featured ★" inactiveLabel="Feature Vendor"
+                  activeClass="bg-purple-600 text-white border-purple-700"
+                  inactiveClass="bg-purple-100 text-purple-900 border-purple-300 hover:bg-purple-200"
+                  icon={<Star className="w-4 h-4" />}
+                  onClick={() => toggleVendorFeatured(selectedVendorForDetails.id)}
+                />
+                <button onClick={() => setVendorToDeleteId(selectedVendorForDetails.id)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 border-2 border-rose-200 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer">
                   <Trash2 className="w-4 h-4" /> Delete
                 </button>
                 <button onClick={() => setSelectedVendorId(null)} className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition cursor-pointer">Close</button>
@@ -951,7 +991,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Modal */}
       {vendorToDelete && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-rose-200">
@@ -968,7 +1008,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Reject Reason Modal */}
+      {/* Reject Modal */}
       {rejectReasonModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-rose-200">
