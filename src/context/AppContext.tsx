@@ -358,6 +358,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // ── StorageManager vendor-change hook ─────────────────────────────────────
+  // Register fetchVendorsFromSupabase as the callback that mockStorage.ts
+  // calls after every confirmed vendor INSERT / UPDATE / DELETE.
+  // This is what makes a newly registered vendor appear in the Admin Approval
+  // Queue immediately — without waiting for the realtime channel to fire.
+  useEffect(() => {
+    StorageManager.onVendorChange = () => {
+      if (!isMountedRef.current) return;
+      fetchVendorsFromSupabase()
+        .then((fresh) => {
+          if (isMountedRef.current && fresh.length > 0) {
+            setVendors(fresh);
+          }
+        })
+        .catch((e) => console.warn('[onVendorChange] fetch error:', e));
+    };
+
+    return () => {
+      StorageManager.onVendorChange = null;
+    };
+  }, []); // runs once on mount; stable — fetchVendorsFromSupabase and setVendors never change
+
   // ── Boot effect ───────────────────────────────────────────────────────────
   useEffect(() => {
     isMountedRef.current = true;
@@ -420,9 +442,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }).catch((e) => console.warn('[initFirestoreSync] Warning:', e));
 
     // ── Realtime vendor subscription ──────────────────────────────────────
-    // This is the ONLY place vendor state gets updated after boot.
-    // We use payload data directly for INSERT/UPDATE to avoid race conditions.
-    // No localStorage reads or writes happen here.
+    // This handles updates from OTHER connected clients (e.g. admin approving
+    // a vendor on a different browser tab or device).
+    // The registering user's own session is handled by StorageManager.onVendorChange
+    // (registered in the effect above), which fires immediately after the INSERT
+    // is confirmed — without any replication lag.
     let realtimeChannel: any = null;
 
     if (supabase) {
@@ -435,9 +459,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (!isMountedRef.current) return;
 
             if (payload.eventType === 'INSERT' && payload.new?.id) {
-              // Immediately add the new vendor from payload — no re-fetch needed.
-              // This is what makes new registrations appear instantly in the
-              // admin approval queue without any delay or race condition.
+              // Merge in the new vendor — deduplicate in case onVendorChange
+              // already added it via the direct SELECT after INSERT.
               const newVendor = rowToVendor(payload.new);
               setVendors((prev) => {
                 if (prev.some((v) => v.id === newVendor.id)) return prev;
@@ -445,14 +468,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               });
 
             } else if (payload.eventType === 'UPDATE' && payload.new?.id) {
-              // Patch just the updated vendor row in state
               const updatedVendor = rowToVendor(payload.new);
               setVendors((prev) =>
                 prev.map((v) => v.id === updatedVendor.id ? updatedVendor : v)
               );
 
             } else if (payload.eventType === 'DELETE' && payload.old?.id) {
-              // Remove the deleted vendor from state immediately
               setVendors((prev) => prev.filter((v) => v.id !== payload.old.id));
 
             } else {
@@ -617,8 +638,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ── Admin vendor actions ──────────────────────────────────────────────────
-  // These write directly to Supabase; the realtime UPDATE event updates React state automatically.
-  // We call refreshData() after each action as a safety net for non-realtime cases.
+  // These write directly to Supabase. StorageManager.updateVendorAsync now calls
+  // refreshVendorsAsync() after each write, which triggers onVendorChange above,
+  // which re-fetches from Supabase and updates React state immediately.
+  // The realtime channel also fires for other connected clients as a secondary path.
 
   const approveVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
@@ -631,7 +654,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       approvedAt: v.approvedAt || new Date().toISOString(),
     };
 
-    // Write to Supabase — realtime UPDATE event will update local state
     await StorageManager.updateVendorAsync(updatedVendor);
 
     const message = `Congratulations ${v.ownerName}! Your business "${v.businessName}" on IkoroduSquare has been APPROVED and is now live! View your shop at: https://ikorodusquare.com.ng/store/${v.slug}`;
@@ -728,7 +750,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteVendor = async (vendorId: string) => {
     const v = vendors.find((item) => item.id === vendorId);
-    // deleteVendorAsync deletes from Supabase; realtime DELETE event removes from state
     await StorageManager.deleteVendorAsync(vendorId);
     showToast('info', 'Vendor Removed', `"${v?.businessName || 'Store'}" has been deleted from IkoroduSquare.`);
   };

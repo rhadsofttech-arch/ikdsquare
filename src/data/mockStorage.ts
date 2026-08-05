@@ -430,6 +430,15 @@ function userToRow(u: User) {
 // ── StorageManager ─────────────────────────────────────────────────────────
 export class StorageManager {
 
+  // ── Vendor change hook ───────────────────────────────────────────────────
+  // AppContext registers its fetchVendorsFromSupabase function here once on
+  // mount: StorageManager.onVendorChange = fetchVendorsFromSupabase;
+  // Every vendor mutation (add / update / delete) calls this after the
+  // Supabase write is confirmed so the UI refreshes immediately — without
+  // depending on the realtime channel (which has replication lag and is
+  // intended for OTHER connected clients, not the mutating user's session).
+  static onVendorChange: (() => void) | null = null;
+
   // ── Orphan repair ─────────────────────────────────────────────────────────
   static async repairOrphanedVendorsAsync(): Promise<number> {
     if (!supabase || !isSupabaseConfigured()) {
@@ -635,23 +644,54 @@ export class StorageManager {
     }
   }
 
-  // ── Vendors — all methods write directly to Supabase ─────────────────────
-  // getVendors() is kept as a fallback only (used by auth resolution etc.)
-  // The main vendor list in the UI comes from AppContext's fetchVendorsFromSupabase().
+  // ── Vendors ───────────────────────────────────────────────────────────────
+
+  /**
+   * Fetches the latest vendor list directly from Supabase, then fires
+   * onVendorChange so AppContext pulls it into React state.
+   *
+   * Call this after every confirmed vendor INSERT / UPDATE / DELETE instead
+   * of relying on the realtime channel, which has replication lag and is
+   * meant for OTHER connected clients — not the user who made the mutation.
+   */
+  static async refreshVendorsAsync(): Promise<Vendor[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      console.warn('[refreshVendorsAsync] Supabase not configured.');
+      return [];
+    }
+    try {
+      const { data, error } = await supabase.from('vendors').select('*');
+      if (error) {
+        console.error('[refreshVendorsAsync] Supabase error:', error.message);
+        return [];
+      }
+      const vendors = (data || []).map(rowToVendor);
+      // Notify AppContext to re-pull vendors into React state
+      StorageManager.onVendorChange?.();
+      return vendors;
+    } catch (err) {
+      console.error('[refreshVendorsAsync] Exception:', err);
+      return [];
+    }
+  }
 
   static getVendors(): Vendor[] {
-    // This method is only used as a fallback when Supabase is unavailable.
-    // Do NOT use this to populate the main vendor list in the UI.
-    return SEED_VENDORS;
+    // Sync fallback — returns empty so callers never receive stale seed data.
+    // The live vendor list is owned by AppContext (fetched from Supabase).
+    // Do NOT use this method to populate the Admin queue or any vendor UI.
+    return [];
   }
 
   static getVendorBySlug(slug: string): Vendor | undefined {
-    // Sync fallback — in production AppContext holds the authoritative list
-    return SEED_VENDORS.find((v) => v.slug.toLowerCase() === slug.toLowerCase());
+    // Sync fallback — AppContext holds the authoritative live list.
+    console.warn('[getVendorBySlug] Called on StorageManager. Use AppContext vendors instead.');
+    return undefined;
   }
 
   static getVendorById(id: string): Vendor | undefined {
-    return SEED_VENDORS.find((v) => v.id === id);
+    // Sync fallback — AppContext holds the authoritative live list.
+    console.warn('[getVendorById] Called on StorageManager. Use AppContext vendors instead.');
+    return undefined;
   }
 
   static async addVendorAsync(newVendor: Vendor): Promise<Vendor> {
@@ -678,6 +718,8 @@ export class StorageManager {
       if (existing) {
         console.log('[addVendorAsync] Vendor with this email already exists, returning existing.');
         newVendor.id = existing.id;
+        // Refresh so the existing vendor is visible immediately
+        await StorageManager.refreshVendorsAsync();
         return rowToVendor(existing);
       }
     }
@@ -697,14 +739,23 @@ export class StorageManager {
     }
 
     if (data && data.length > 0) {
-      console.log('✅ [addVendorAsync] Vendor created in Supabase:', data[0].id);
-      return rowToVendor(data[0]);
+      const savedVendor = rowToVendor(data[0]);
+      console.log('✅ [addVendorAsync] Vendor created in Supabase:', savedVendor.id);
+      // ─────────────────────────────────────────────────────────────────────
+      // CRITICAL: Immediately query Supabase and notify AppContext.
+      // Do NOT rely on the realtime INSERT event for the registering user's
+      // own session — realtime has replication lag (200ms–2s+) and exists
+      // for OTHER connected clients. This direct refresh is what causes the
+      // new vendor to appear in the Admin Approval Queue without a page reload.
+      // ─────────────────────────────────────────────────────────────────────
+      await StorageManager.refreshVendorsAsync();
+      return savedVendor;
     }
 
     console.warn('⚠️ [addVendorAsync] Supabase returned empty data, returning original object.');
+    // Still attempt a refresh so AppContext has the freshest possible data
+    await StorageManager.refreshVendorsAsync();
     return newVendor;
-    // NOTE: We do NOT write to localStorage here.
-    // AppContext's realtime INSERT handler picks up the new row and updates state.
   }
 
   static addVendor(newVendor: Vendor): Vendor {
@@ -729,12 +780,14 @@ export class StorageManager {
     if (data && data.length > 0) {
       const savedVendor = rowToVendor(data[0]);
       console.log('✅ [updateVendorAsync] Vendor updated in Supabase:', savedVendor.id);
+      // Immediately refresh rather than relying on realtime UPDATE event
+      await StorageManager.refreshVendorsAsync();
       return savedVendor;
     }
 
+    // Refresh even if Supabase returned no row — state should still be current
+    await StorageManager.refreshVendorsAsync();
     return updated;
-    // NOTE: No localStorage write. AppContext's realtime UPDATE handler
-    // receives the change and patches React state.
   }
 
   static updateVendor(updated: Vendor): Vendor {
@@ -759,8 +812,8 @@ export class StorageManager {
     }
 
     console.log('✅ [deleteVendorAsync] Vendor deleted from Supabase:', vendorId);
-    // NOTE: No localStorage write. AppContext's realtime DELETE handler
-    // removes the vendor from React state automatically.
+    // Immediately refresh — do not rely on realtime DELETE event
+    await StorageManager.refreshVendorsAsync();
   }
 
   static deleteVendor(vendorId: string): void {
