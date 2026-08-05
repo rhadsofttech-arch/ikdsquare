@@ -1,24 +1,8 @@
-import {
-  Vendor, Product, Review, Enquiry, User, BannerAd, Order,
-  DeliveryAddress, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS,
-} from '../types';
+import { Vendor, Product, Review, Enquiry, User, BannerAd, Order, DeliveryAddress, Promotion, PromotionStatus, AdminSettings, DEFAULT_ADMIN_SETTINGS } from '../types';
 import { SEED_VENDORS, SEED_PRODUCTS, SEED_REVIEWS, INITIAL_BANNER_ADS, INITIAL_PROMOTIONS } from './ikoroduData';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
-// ── localStorage keys (vendors intentionally excluded — they live in Supabase) ─
-const PRODUCTS_KEY   = 'ikorodusquare_products_v1';
-const REVIEWS_KEY    = 'ikorodusquare_reviews_v1';
-const ENQUIRIES_KEY  = 'ikorodusquare_enquiries_v1';
-const USERS_KEY      = 'ikorodusquare_users_v1';
-const CURRENT_USER_KEY = 'ikorodusquare_current_user_v1';
-const FAVORITES_KEY  = 'ikorodusquare_favorites_v1';
-const BANNERS_KEY    = 'ikorodusquare_banners_v1';
-const ORDERS_KEY     = 'ikorodusquare_orders_v1';
-const PROMOTIONS_KEY = 'ikorodusquare_promotions_v1';
-const SETTINGS_KEY   = 'ikorodusquare_settings_v2';
-
-// Product-level soft-delete tombstone (vendors are hard-deleted from Supabase)
-const DELETED_PRODUCT_IDS_KEY = 'ikorodusquare_deleted_product_ids';
+const FAVORITES_KEY = 'ikorodusquare_favorites_v1';
 
 export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
   {
@@ -28,7 +12,7 @@ export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
     area: 'Agric',
     landmark: 'Opposite First Bank, Yellow Gate',
     phone: '08023456789',
-    isDefault: true,
+    isDefault: true
   },
   {
     id: 'addr_2',
@@ -37,8 +21,8 @@ export const INITIAL_DELIVERY_ADDRESSES: DeliveryAddress[] = [
     area: 'Sabo Market',
     landmark: 'Near Zenith Bank ATM',
     phone: '08023456789',
-    isDefault: false,
-  },
+    isDefault: false
+  }
 ];
 
 export const SEED_ORDERS: Order[] = [
@@ -62,7 +46,7 @@ export const SEED_ORDERS: Order[] = [
         quantity: 1,
         vendorId: 'v1',
         vendorName: 'Ikorodu Tech & Gadget Hub',
-        vendorSlug: 'ikorodu-tech-gadget-hub',
+        vendorSlug: 'ikorodu-tech-gadget-hub'
       },
       {
         id: 'item_2',
@@ -72,8 +56,8 @@ export const SEED_ORDERS: Order[] = [
         quantity: 2,
         vendorId: 'v1',
         vendorName: 'Ikorodu Tech & Gadget Hub',
-        vendorSlug: 'ikorodu-tech-gadget-hub',
-      },
+        vendorSlug: 'ikorodu-tech-gadget-hub'
+      }
     ],
     totalAmount: 31500,
     status: 'dispatched',
@@ -81,7 +65,7 @@ export const SEED_ORDERS: Order[] = [
     paymentMethod: 'pay_on_delivery',
     notes: 'Please call before heading down from Sabo Bus Stop.',
     createdAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-    updatedAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+    updatedAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString()
   },
   {
     id: 'ord_102',
@@ -103,8 +87,8 @@ export const SEED_ORDERS: Order[] = [
         quantity: 1,
         vendorId: 'v2',
         vendorName: 'Elegance Fabrics & Ready-to-Wear',
-        vendorSlug: 'elegance-fabrics-ikorodu',
-      },
+        vendorSlug: 'elegance-fabrics-ikorodu'
+      }
     ],
     totalAmount: 18000,
     status: 'delivered',
@@ -112,8 +96,8 @@ export const SEED_ORDERS: Order[] = [
     paymentMethod: 'bank_transfer',
     notes: 'Delivered directly to shop office.',
     createdAt: new Date(Date.now() - 3600 * 1000 * 48).toISOString(),
-    updatedAt: new Date(Date.now() - 3600 * 1000 * 24).toISOString(),
-  },
+    updatedAt: new Date(Date.now() - 3600 * 1000 * 24).toISOString()
+  }
 ];
 
 export const SEED_ENQUIRIES: Enquiry[] = [
@@ -144,28 +128,7 @@ export const SEED_ENQUIRIES: Enquiry[] = [
   },
 ];
 
-// ── Product soft-delete helpers ────────────────────────────────────────────
-function getDeletedProductIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DELETED_PRODUCT_IDS_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function persistDeletedProductId(productId: string): void {
-  try {
-    const ids = getDeletedProductIds();
-    ids.add(productId);
-    localStorage.setItem(DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(ids)));
-  } catch {
-    // ignore
-  }
-}
-
-// ── Data mappers ───────────────────────────────────────────────────────────
-
+// Data Mappers between TypeScript and Supabase PostgreSQL schema
 export async function generateUniqueVendorSlug(businessName: string): Promise<string> {
   const baseSlug = (businessName || 'vendor-store')
     .toLowerCase()
@@ -174,11 +137,10 @@ export async function generateUniqueVendorSlug(businessName: string): Promise<st
     .replace(/(^-|-$)+/g, '') || 'vendor-store';
 
   if (!supabase || !isSupabaseConfigured()) {
-    // Fallback: check against seed vendors only
-    const usedSlugs = new Set(SEED_VENDORS.map((v) => v.slug?.toLowerCase()));
+    const localVendors = await StorageManager.getVendorsAsync();
     let uniqueSlug = baseSlug;
     let counter = 1;
-    while (usedSlugs.has(uniqueSlug.toLowerCase())) {
+    while (localVendors.some((v) => v.slug?.toLowerCase() === uniqueSlug.toLowerCase())) {
       uniqueSlug = `${baseSlug}-${counter}`;
       counter++;
     }
@@ -188,11 +150,12 @@ export async function generateUniqueVendorSlug(businessName: string): Promise<st
   try {
     const { data: existingRows, error } = await supabase.from('vendors').select('slug');
     if (error) {
-      console.error('❌ Error fetching vendor slugs:', error.message);
+      console.error('❌ Error fetching existing vendor slugs from Supabase:', error.message, error.details, error.code, error.hint);
     }
     const existingSlugs = new Set(
       (existingRows || []).map((r: any) => r.slug?.toLowerCase().trim()).filter(Boolean)
     );
+
     let uniqueSlug = baseSlug;
     let counter = 1;
     while (existingSlugs.has(uniqueSlug.toLowerCase())) {
@@ -225,8 +188,8 @@ export function vendorToRow(v: Vendor) {
     address: v.address,
     cover_photo_url: v.coverPhotoURL,
     logo_url: v.logoURL,
-    status: v.status || 'pending',
-    is_live: v.isLive ?? false,
+    status: v.status,
+    is_live: v.isLive,
     is_premium: v.isPremium,
     nin_verified: v.ninVerified ?? v.nin_verified ?? false,
     is_featured: isFeaturedVal,
@@ -257,8 +220,8 @@ export function rowToVendor(r: any): Vendor {
     address: r.address || '',
     coverPhotoURL: r.cover_photo_url || r.coverPhotoURL || '',
     logoURL: r.logo_url || r.logoURL || '',
-    status: (r.status as Vendor['status']) || 'pending',
-    isLive: r.is_live ?? r.isLive ?? false,
+    status: r.status || 'approved',
+    isLive: r.is_live ?? r.isLive ?? true,
     isPremium: r.is_premium ?? r.isPremium ?? false,
     ninVerified: ninVerifiedVal,
     nin_verified: ninVerifiedVal,
@@ -427,66 +390,84 @@ function userToRow(u: User) {
   };
 }
 
-// ── StorageManager ─────────────────────────────────────────────────────────
 export class StorageManager {
-
-  // ── Vendor change hook ───────────────────────────────────────────────────
-  // AppContext registers its fetchVendorsFromSupabase function here once on
-  // mount: StorageManager.onVendorChange = fetchVendorsFromSupabase;
-  // Every vendor mutation (add / update / delete) calls this after the
-  // Supabase write is confirmed so the UI refreshes immediately — without
-  // depending on the realtime channel (which has replication lag and is
-  // intended for OTHER connected clients, not the mutating user's session).
   static onVendorChange: (() => void) | null = null;
 
-  // ── Orphan repair ─────────────────────────────────────────────────────────
+  // Recovery script function: Repairs orphaned vendor users in public.users without corresponding public.vendors records
   static async repairOrphanedVendorsAsync(): Promise<number> {
     if (!supabase || !isSupabaseConfigured()) {
-      console.log('[Repair]: Supabase not configured, skipping.');
+      console.log('[Repair Script]: Supabase not configured. Skipping orphan vendor repair.');
       return 0;
     }
 
     try {
+      console.log('🔍 [Repair Script] Scanning public.users for vendor users without corresponding public.vendors records...');
+
       const { data: vendorUsers, error: userErr } = await supabase
-        .from('users').select('*').eq('role', 'vendor');
+        .from('users')
+        .select('*')
+        .eq('role', 'vendor');
 
-      if (userErr || !vendorUsers || vendorUsers.length === 0) return 0;
+      if (userErr) {
+        console.error('❌ [Repair Script] Error querying public.users:', userErr.message, userErr.details, userErr.code, userErr.hint);
+        return 0;
+      }
 
-      const { data: existingVendorRows } = await supabase.from('vendors').select('*');
-      const existingVendors   = (existingVendorRows || []).map(rowToVendor);
-      const existingEmails    = new Set(existingVendors.map((v) => v.email?.toLowerCase().trim()).filter(Boolean));
-      const existingVendorIds = new Set(existingVendors.map((v) => v.id).filter(Boolean));
-      const existingSlugs     = new Set(existingVendors.map((v) => v.slug?.toLowerCase().trim()).filter(Boolean));
+      if (!vendorUsers || vendorUsers.length === 0) {
+        console.log('ℹ️ [Repair Script] No vendor users found in public.users.');
+        return 0;
+      }
+
+      const { data: existingVendorRows, error: vendorErr } = await supabase
+        .from('vendors')
+        .select('*');
+
+      if (vendorErr) {
+        console.error('❌ [Repair Script] Error querying public.vendors:', vendorErr.message, vendorErr.details, vendorErr.code, vendorErr.hint);
+        return 0;
+      }
+
+      const existingVendors = (existingVendorRows || []).map(rowToVendor);
+      const existingEmails = new Set(
+        existingVendors.map((v) => v.email?.toLowerCase().trim()).filter(Boolean)
+      );
+      const existingVendorIds = new Set(
+        existingVendors.map((v) => v.id).filter(Boolean)
+      );
+      const existingSlugs = new Set(
+        existingVendors.map((v) => v.slug?.toLowerCase().trim()).filter(Boolean)
+      );
 
       let repairedCount = 0;
 
       for (const u of vendorUsers) {
-        const uEmail    = (u.email || '').toLowerCase().trim();
+        const uEmail = (u.email || '').toLowerCase().trim();
         const uVendorId = u.vendor_id;
 
-        const vendorExists =
-          (uEmail && existingEmails.has(uEmail)) ||
-          (uVendorId && existingVendorIds.has(uVendorId));
+        const vendorExists = (uEmail && existingEmails.has(uEmail)) || (uVendorId && existingVendorIds.has(uVendorId));
 
         if (vendorExists) {
           const existingVendor = existingVendors.find(
-            (v) =>
-              (uEmail && v.email?.toLowerCase().trim() === uEmail) ||
-              (uVendorId && v.id === uVendorId)
+            (v) => (uEmail && v.email?.toLowerCase().trim() === uEmail) || (uVendorId && v.id === uVendorId)
           );
           if (existingVendor && u.vendor_id !== existingVendor.id) {
+            console.log(`[Repair Script] Linking existing vendor ID "${existingVendor.id}" to user "${u.id}" in public.users...`);
             await supabase.from('users').update({ vendor_id: existingVendor.id }).eq('id', u.id);
           }
           continue;
         }
 
-        console.warn(`⚠️ [Repair] Orphaned vendor user: ${u.email} (${u.id})`);
+        console.warn(`⚠️ [Repair Script] Orphaned vendor user found! Email: "${u.email}", User ID: "${u.id}". Repairing and creating record in public.vendors...`);
 
-        const rawName  = u.name || (u.email ? u.email.split('@')[0] : 'Vendor Store');
-        const baseSlug = rawName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') || 'vendor-store';
+        const rawName = u.name || (u.email ? u.email.split('@')[0] : 'Vendor Store');
+        const baseSlug = rawName
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)+/g, '') || 'vendor-store';
 
         let uniqueSlug = baseSlug;
-        let counter    = 1;
+        let counter = 1;
         while (existingSlugs.has(uniqueSlug.toLowerCase())) {
           uniqueSlug = `${baseSlug}-${counter}`;
           counter++;
@@ -508,7 +489,7 @@ export class StorageManager {
           subCategory: 'General Merchant',
           area: u.area || 'Ikorodu',
           zone: 'East zone',
-          description: `${rawName} is a local vendor in ${u.area || 'Ikorodu'}, Ikorodu.`,
+          description: `${rawName} is a local vendor operating in ${u.area || 'Ikorodu'}, Ikorodu.`,
           address: `${u.area || 'Ikorodu'}, Ikorodu, Lagos State`,
           coverPhotoURL: 'https://images.unsplash.com/photo-1556742049-0a670f4a4591?auto=format&fit=crop&w=1000&q=80',
           logoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
@@ -520,347 +501,343 @@ export class StorageManager {
           createdAt: u.created_at || new Date().toISOString(),
           rating: 5.0,
           reviewCount: 0,
-          analytics: { profileViews: 0, whatsappTaps: 0, productViews: 0, dailyViews: [] },
+          analytics: {
+            profileViews: 0,
+            whatsappTaps: 0,
+            productViews: 0,
+            dailyViews: [],
+          },
         };
 
-        const { error: insertError } = await supabase.from('vendors').upsert(vendorToRow(newVendorObj));
+        const row = vendorToRow(newVendorObj);
+        const { data: insertedData, error: insertError } = await supabase
+          .from('vendors')
+          .upsert(row)
+          .select();
+
         if (insertError) {
-          console.error('❌ [Repair] Failed to insert vendor:', insertError.message);
+          console.error('❌ [Repair Script] Failed to insert missing vendor into public.vendors:', insertError.message, insertError.details, insertError.code, insertError.hint);
         } else {
+          console.log('✅ [Repair Script] Successfully created missing vendor in public.vendors:', insertedData);
           repairedCount++;
           existingEmails.add(uEmail);
           existingVendorIds.add(newVendorId);
+
           await supabase.from('users').update({ vendor_id: newVendorId }).eq('id', u.id);
         }
       }
 
+      if (repairedCount > 0) {
+        console.log(`🎉 [Repair Script] Successfully repaired ${repairedCount} orphaned vendor user(s).`);
+      } else {
+        console.log('✅ [Repair Script] All vendor users already have corresponding vendor records in public.vendors.');
+      }
+
       return repairedCount;
     } catch (err) {
-      console.error('❌ [Repair] Exception:', err);
+      console.error('❌ [Repair Script] Exception running vendor repair script:', err);
       return 0;
     }
   }
 
-  // ── initFirestoreSync — handles products, reviews, orders, enquiries only ─
-  // IMPORTANT: vendors are intentionally NOT handled here.
-  // Vendor state is managed exclusively by AppContext via fetchVendorsFromSupabase()
-  // and the realtime channel in AppContext. This prevents the double-write
-  // localStorage→Supabase→localStorage race condition.
+  // Sync Supabase PostgreSQL data on boot — NO localStorage usage
   static async initFirestoreSync(onUpdate?: () => void): Promise<void> {
     if (!supabase || !isSupabaseConfigured()) {
-      console.log('[Sync] Supabase not configured. Using localStorage fallback.');
+      console.log('[Supabase Sync Note]: Supabase URL/Key not configured.');
       return;
     }
 
     try {
-      // Run orphan repair silently in background
-      this.repairOrphanedVendorsAsync().catch((e) =>
-        console.warn('[Repair] Background repair warning:', e)
-      );
+      await this.repairOrphanedVendorsAsync();
 
-      // Seed vendors to Supabase only if the table is empty (first-time setup)
-      const { data: vendorCheck, error: vcErr } = await supabase
-        .from('vendors').select('id').limit(1);
-      if (!vcErr && (!vendorCheck || vendorCheck.length === 0)) {
-        console.log('[Sync] Seeding initial vendors to Supabase...');
+      // 1. Fetch & Seed Vendors
+      const { data: supaVendors, error: vErr } = await supabase.from('vendors').select('*');
+      if (vErr) {
+        console.error('Supabase fetch vendors error:', vErr);
+      } else if (supaVendors && supaVendors.length > 0) {
+        if (onUpdate) onUpdate();
+      } else {
+        console.log('[Supabase] Seeding initial vendors to Supabase...');
         for (const v of SEED_VENDORS) {
           await supabase.from('vendors').upsert(vendorToRow(v));
         }
+        if (onUpdate) onUpdate();
       }
-      // NOTE: We do NOT write vendors to localStorage here.
-      // AppContext fetches vendors directly from Supabase on boot.
 
-      // Products
+      // 2. Fetch & Seed Products
       const { data: supaProducts, error: pErr } = await supabase.from('products').select('*');
       if (pErr) {
-        console.error('[Sync] products fetch error:', pErr.message);
+        console.error('Supabase fetch products error:', pErr);
       } else if (supaProducts && supaProducts.length > 0) {
-        const deletedProductIds = getDeletedProductIds();
-        const fetched = supaProducts
-          .map(rowToProduct)
-          .filter((p: Product) => !deletedProductIds.has(p.id));
-        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(fetched));
         if (onUpdate) onUpdate();
       } else {
-        console.log('[Sync] Seeding initial products...');
+        console.log('[Supabase] Seeding initial products to Supabase...');
         for (const p of SEED_PRODUCTS) {
           await supabase.from('products').upsert(productToRow(p));
         }
+        if (onUpdate) onUpdate();
       }
 
-      // Reviews
+      // 3. Fetch & Seed Reviews
       const { data: supaReviews } = await supabase.from('reviews').select('*');
       if (supaReviews && supaReviews.length > 0) {
-        localStorage.setItem(REVIEWS_KEY, JSON.stringify(supaReviews.map(rowToReview)));
+        if (onUpdate) onUpdate();
       } else {
         for (const r of SEED_REVIEWS) {
           await supabase.from('reviews').upsert(reviewToRow(r));
         }
+        if (onUpdate) onUpdate();
       }
 
-      // Orders
+      // 4. Fetch & Seed Orders
       const { data: supaOrders } = await supabase.from('orders').select('*');
       if (supaOrders && supaOrders.length > 0) {
-        localStorage.setItem(ORDERS_KEY, JSON.stringify(supaOrders.map(rowToOrder)));
+        if (onUpdate) onUpdate();
       } else {
         for (const o of SEED_ORDERS) {
           await supabase.from('orders').upsert(orderToRow(o));
         }
+        if (onUpdate) onUpdate();
       }
 
-      // Enquiries
+      // 5. Fetch & Seed Enquiries
       const { data: supaEnquiries } = await supabase.from('enquiries').select('*');
       if (supaEnquiries && supaEnquiries.length > 0) {
-        localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(supaEnquiries.map(rowToEnquiry)));
         if (onUpdate) onUpdate();
       } else {
         for (const e of SEED_ENQUIRIES) {
           await supabase.from('enquiries').upsert(enquiryToRow(e));
         }
+        if (onUpdate) onUpdate();
       }
 
-      // Realtime for products only — vendors are handled in AppContext
+      // Subscribe to Realtime Table Changes (trigger onUpdate callback directly)
       supabase
-        .channel('storage:products')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'products' },
-          async () => {
-            const { data } = await supabase.from('products').select('*');
-            if (data) {
-              const deletedProductIds = getDeletedProductIds();
-              const fresh = data
-                .map(rowToProduct)
-                .filter((p: Product) => !deletedProductIds.has(p.id));
-              localStorage.setItem(PRODUCTS_KEY, JSON.stringify(fresh));
-              if (onUpdate) onUpdate();
-            }
-          }
-        )
+        .channel('public:vendors')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vendors' }, async () => {
+          if (onUpdate) onUpdate();
+        })
+        .subscribe();
+
+      supabase
+        .channel('public:products')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, async () => {
+          if (onUpdate) onUpdate();
+        })
         .subscribe();
 
     } catch (error) {
-      console.warn('[Sync] Operating with localStorage fallback:', error);
+      console.warn('[Supabase Sync Note]: Error initializing sync:', error);
     }
   }
 
-  // ── Vendors ───────────────────────────────────────────────────────────────
+  // --- VENDORS ---
 
-  /**
-   * Fetches the latest vendor list directly from Supabase, then fires
-   * onVendorChange so AppContext pulls it into React state.
-   *
-   * Call this after every confirmed vendor INSERT / UPDATE / DELETE instead
-   * of relying on the realtime channel, which has replication lag and is
-   * meant for OTHER connected clients — not the user who made the mutation.
-   */
-  static async refreshVendorsAsync(): Promise<Vendor[]> {
+  static async getVendorsAsync(): Promise<Vendor[]> {
     if (!supabase || !isSupabaseConfigured()) {
-      console.warn('[refreshVendorsAsync] Supabase not configured.');
-      return [];
+      return SEED_VENDORS;
     }
     try {
       const { data, error } = await supabase.from('vendors').select('*');
-      if (error) {
-        console.error('[refreshVendorsAsync] Supabase error:', error.message);
-        return [];
+      if (error || !data || data.length === 0) {
+        if (!data || data.length === 0) {
+          for (const v of SEED_VENDORS) {
+            await supabase.from('vendors').upsert(vendorToRow(v));
+          }
+        }
+        return SEED_VENDORS;
       }
-      const vendors = (data || []).map(rowToVendor);
-      // Notify AppContext to re-pull vendors into React state
-      StorageManager.onVendorChange?.();
-      return vendors;
-    } catch (err) {
-      console.error('[refreshVendorsAsync] Exception:', err);
-      return [];
+      return data.map(rowToVendor);
+    } catch (e) {
+      console.error('getVendorsAsync error:', e);
+      return SEED_VENDORS;
     }
   }
 
   static getVendors(): Vendor[] {
-    // Sync fallback — returns empty so callers never receive stale seed data.
-    // The live vendor list is owned by AppContext (fetched from Supabase).
-    // Do NOT use this method to populate the Admin queue or any vendor UI.
-    return [];
+    return SEED_VENDORS;
+  }
+
+  static saveVendors(_vendors: Vendor[]): void {
+    // Sync stub — no localStorage write
+  }
+
+  static async getVendorBySlugAsync(slug: string): Promise<Vendor | undefined> {
+    if (!slug) return undefined;
+    const raw = slug.toLowerCase().trim();
+    const cleanSlug = raw.replace(/[^a-z0-9]/g, '');
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase.from('vendors').select('*').ilike('slug', slug).maybeSingle();
+        if (data) return rowToVendor(data);
+      } catch (e) {
+        console.error('getVendorBySlugAsync error:', e);
+      }
+    }
+    const vendors = await this.getVendorsAsync();
+    return vendors.find((v) => {
+      const vSlug = v.slug.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const vName = v.businessName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const vId = v.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return vSlug === cleanSlug || vName.includes(cleanSlug) || vId === cleanSlug;
+    });
   }
 
   static getVendorBySlug(slug: string): Vendor | undefined {
-    // Sync fallback — AppContext holds the authoritative live list.
-    console.warn('[getVendorBySlug] Called on StorageManager. Use AppContext vendors instead.');
-    return undefined;
+    const raw = (slug || '').toLowerCase().trim();
+    const cleanSlug = raw.replace(/[^a-z0-9]/g, '');
+    return SEED_VENDORS.find((v) => {
+      const vSlug = v.slug.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const vName = v.businessName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const vId = v.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return vSlug === cleanSlug || vName.includes(cleanSlug) || vId === cleanSlug;
+    });
+  }
+
+  static async getVendorByIdAsync(id: string): Promise<Vendor | undefined> {
+    if (!id) return undefined;
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase.from('vendors').select('*').eq('id', id).maybeSingle();
+        if (data) return rowToVendor(data);
+      } catch (e) {
+        console.error('getVendorByIdAsync error:', e);
+      }
+    }
+    const vendors = await this.getVendorsAsync();
+    return vendors.find((v) => v.id === id);
   }
 
   static getVendorById(id: string): Vendor | undefined {
-    // Sync fallback — AppContext holds the authoritative live list.
-    console.warn('[getVendorById] Called on StorageManager. Use AppContext vendors instead.');
-    return undefined;
+    return SEED_VENDORS.find((v) => v.id === id);
   }
 
   static async addVendorAsync(newVendor: Vendor): Promise<Vendor> {
     if (!newVendor.slug) {
       newVendor.slug = await generateUniqueVendorSlug(newVendor.businessName || 'vendor');
     }
-    // Always start as pending — admin must approve
-    newVendor.status  = newVendor.status || 'pending';
-    newVendor.isLive  = newVendor.isLive ?? false;
 
-    if (!supabase) {
-      console.warn('[addVendorAsync] Supabase not available');
-      return newVendor;
-    }
+    if (!newVendor.status) newVendor.status = 'pending';
+    if (newVendor.isLive === undefined) newVendor.isLive = false;
 
-    // Check if vendor with this email already exists
-    if (newVendor.email) {
-      const { data: existing } = await supabase
-        .from('vendors')
-        .select('*')
-        .ilike('email', newVendor.email)
-        .maybeSingle();
+    if (supabase) {
+      try {
+        if (newVendor.email) {
+          const { data: existingSupaVendor } = await supabase
+            .from('vendors')
+            .select('*')
+            .ilike('email', newVendor.email)
+            .maybeSingle();
 
-      if (existing) {
-        console.log('[addVendorAsync] Vendor with this email already exists, returning existing.');
-        newVendor.id = existing.id;
-        // Refresh so the existing vendor is visible immediately
-        await StorageManager.refreshVendorsAsync();
-        return rowToVendor(existing);
+          if (existingSupaVendor) {
+            newVendor.id = existingSupaVendor.id;
+          }
+        }
+
+        const row = vendorToRow(newVendor);
+        console.log('[Supabase] Inserting vendor to database table "vendors":', row.id, row.business_name, row.slug);
+
+        const { data, error } = await supabase.from('vendors').upsert(row).select();
+
+        if (error) {
+          console.error('❌ Supabase vendor insert error:', error.message, error.details, error.code, error.hint);
+          throw new Error(`Database vendor creation failed: ${error.message}`);
+        } else if (data && data.length > 0) {
+          console.log('✅ Vendor record successfully created in Supabase database:', data[0]);
+          newVendor = rowToVendor(data[0]);
+        }
+      } catch (error: any) {
+        console.error('❌ Exception writing vendor to Supabase:', error);
+        throw error;
       }
     }
 
-    const row = vendorToRow(newVendor);
-    // Belt-and-suspenders: explicitly set status and is_live on the row
-    row.status  = 'pending';
-    row.is_live = false;
-
-    console.log('[addVendorAsync] Writing new vendor to Supabase:', row.id, row.business_name, row.slug);
-
-    const { data, error } = await supabase.from('vendors').upsert(row).select();
-
-    if (error) {
-      console.error('❌ [addVendorAsync] Supabase insert error:', error.message, error.details);
-      throw new Error(`Vendor creation failed: ${error.message}`);
+    if (this.onVendorChange) {
+      this.onVendorChange();
     }
 
-    if (data && data.length > 0) {
-      const savedVendor = rowToVendor(data[0]);
-      console.log('✅ [addVendorAsync] Vendor created in Supabase:', savedVendor.id);
-      // ─────────────────────────────────────────────────────────────────────
-      // CRITICAL: Immediately query Supabase and notify AppContext.
-      // Do NOT rely on the realtime INSERT event for the registering user's
-      // own session — realtime has replication lag (200ms–2s+) and exists
-      // for OTHER connected clients. This direct refresh is what causes the
-      // new vendor to appear in the Admin Approval Queue without a page reload.
-      // ─────────────────────────────────────────────────────────────────────
-      await StorageManager.refreshVendorsAsync();
-      return savedVendor;
-    }
-
-    console.warn('⚠️ [addVendorAsync] Supabase returned empty data, returning original object.');
-    // Still attempt a refresh so AppContext has the freshest possible data
-    await StorageManager.refreshVendorsAsync();
     return newVendor;
   }
 
   static addVendor(newVendor: Vendor): Vendor {
-    this.addVendorAsync(newVendor).catch((e) => console.error('[addVendor] async error:', e));
+    this.addVendorAsync(newVendor);
     return newVendor;
   }
 
   static async updateVendorAsync(updated: Vendor): Promise<Vendor> {
-    if (!supabase) {
-      console.warn('[updateVendorAsync] Supabase not available');
-      return updated;
+    if (supabase) {
+      try {
+        await supabase.from('vendors').upsert(vendorToRow(updated));
+      } catch (error) {
+        console.error('Supabase update error (vendor):', error);
+      }
     }
-
-    const row = vendorToRow(updated);
-    const { data, error } = await supabase.from('vendors').upsert(row).select();
-
-    if (error) {
-      console.error('❌ [updateVendorAsync] Supabase update error:', error.message);
-      throw new Error(`Vendor update failed: ${error.message}`);
+    if (this.onVendorChange) {
+      this.onVendorChange();
     }
-
-    if (data && data.length > 0) {
-      const savedVendor = rowToVendor(data[0]);
-      console.log('✅ [updateVendorAsync] Vendor updated in Supabase:', savedVendor.id);
-      // Immediately refresh rather than relying on realtime UPDATE event
-      await StorageManager.refreshVendorsAsync();
-      return savedVendor;
-    }
-
-    // Refresh even if Supabase returned no row — state should still be current
-    await StorageManager.refreshVendorsAsync();
     return updated;
   }
 
   static updateVendor(updated: Vendor): Vendor {
-    this.updateVendorAsync(updated).catch((e) => console.error('[updateVendor] async error:', e));
+    this.updateVendorAsync(updated);
     return updated;
   }
 
   static async deleteVendorAsync(vendorId: string): Promise<void> {
-    if (!supabase) {
-      console.warn('[deleteVendorAsync] Supabase not available');
-      return;
+    if (supabase) {
+      try {
+        await supabase.from('vendors').delete().eq('id', vendorId);
+        await supabase.from('products').delete().eq('vendor_id', vendorId);
+      } catch (error) {
+        console.error('Supabase delete error (vendor):', error);
+      }
     }
-
-    // Delete products belonging to this vendor from Supabase
-    await supabase.from('products').delete().eq('vendor_id', vendorId);
-    // Delete the vendor from Supabase
-    const { error } = await supabase.from('vendors').delete().eq('id', vendorId);
-
-    if (error) {
-      console.error('❌ [deleteVendorAsync] Supabase delete error:', error.message);
-      throw new Error(`Vendor delete failed: ${error.message}`);
+    if (this.onVendorChange) {
+      this.onVendorChange();
     }
-
-    console.log('✅ [deleteVendorAsync] Vendor deleted from Supabase:', vendorId);
-    // Immediately refresh — do not rely on realtime DELETE event
-    await StorageManager.refreshVendorsAsync();
   }
 
   static deleteVendor(vendorId: string): void {
-    this.deleteVendorAsync(vendorId).catch((e) => console.error('[deleteVendor] async error:', e));
+    this.deleteVendorAsync(vendorId);
   }
 
-  // ── Products ──────────────────────────────────────────────────────────────
+  // --- PRODUCTS ---
 
-  static getProducts(): Product[] {
+  static async getProductsAsync(): Promise<Product[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return SEED_PRODUCTS;
+    }
     try {
-      const data = localStorage.getItem(PRODUCTS_KEY);
-      if (!data) {
-        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(SEED_PRODUCTS));
+      const { data, error } = await supabase.from('products').select('*');
+      if (error || !data || data.length === 0) {
+        if (!data || data.length === 0) {
+          for (const p of SEED_PRODUCTS) {
+            await supabase.from('products').upsert(productToRow(p));
+          }
+        }
         return SEED_PRODUCTS;
       }
-      const list: Product[] = JSON.parse(data);
-      const existingIds     = new Set(list.map((p) => p.id));
-      const deletedProductIds = getDeletedProductIds();
-
-      let updated = false;
-      for (const sp of SEED_PRODUCTS) {
-        if (!existingIds.has(sp.id) && !deletedProductIds.has(sp.id)) {
-          list.push(sp);
-          updated = true;
-        }
-      }
-      if (updated) localStorage.setItem(PRODUCTS_KEY, JSON.stringify(list));
-      return list;
-    } catch {
+      return data.map(rowToProduct);
+    } catch (e) {
+      console.error('getProductsAsync error:', e);
       return SEED_PRODUCTS;
     }
   }
 
-  static saveProducts(products: Product[]): void {
-    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+  static getProducts(): Product[] {
+    return SEED_PRODUCTS;
+  }
+
+  static saveProducts(_products: Product[]): void {
+    // Sync stub
   }
 
   static async addProductAsync(product: Product): Promise<Product> {
-    const products = this.getProducts();
-    products.unshift(product);
-    this.saveProducts(products);
-
     if (supabase) {
       try {
         await supabase.from('products').upsert(productToRow(product));
       } catch (error) {
-        console.error('[addProductAsync] Supabase error:', error);
+        console.error('Supabase write error (product):', error);
       }
     }
     return product;
@@ -872,18 +849,11 @@ export class StorageManager {
   }
 
   static async updateProductAsync(updated: Product): Promise<Product> {
-    const products = this.getProducts();
-    const idx      = products.findIndex((p) => p.id === updated.id);
-    if (idx !== -1) {
-      products[idx] = updated;
-      this.saveProducts(products);
-    }
-
     if (supabase) {
       try {
         await supabase.from('products').upsert(productToRow(updated));
       } catch (error) {
-        console.error('[updateProductAsync] Supabase error:', error);
+        console.error('Supabase update error (product):', error);
       }
     }
     return updated;
@@ -895,15 +865,11 @@ export class StorageManager {
   }
 
   static async deleteProductAsync(productId: string): Promise<void> {
-    persistDeletedProductId(productId);
-    const products = this.getProducts().filter((p) => p.id !== productId);
-    this.saveProducts(products);
-
     if (supabase) {
       try {
         await supabase.from('products').delete().eq('id', productId);
       } catch (error) {
-        console.error('[deleteProductAsync] Supabase error:', error);
+        console.error('Supabase delete error (product):', error);
       }
     }
   }
@@ -912,46 +878,50 @@ export class StorageManager {
     this.deleteProductAsync(productId);
   }
 
-  // ── Reviews ───────────────────────────────────────────────────────────────
+  // --- REVIEWS ---
 
-  static getReviews(): Review[] {
+  static async getReviewsAsync(): Promise<Review[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return SEED_REVIEWS;
+    }
     try {
-      const data = localStorage.getItem(REVIEWS_KEY);
-      if (!data) {
-        localStorage.setItem(REVIEWS_KEY, JSON.stringify(SEED_REVIEWS));
+      const { data, error } = await supabase.from('reviews').select('*');
+      if (error || !data || data.length === 0) {
+        if (!data || data.length === 0) {
+          for (const r of SEED_REVIEWS) {
+            await supabase.from('reviews').upsert(reviewToRow(r));
+          }
+        }
         return SEED_REVIEWS;
       }
-      return JSON.parse(data);
-    } catch {
+      return data.map(rowToReview);
+    } catch (e) {
+      console.error('getReviewsAsync error:', e);
       return SEED_REVIEWS;
     }
   }
 
-  static async addReviewAsync(review: Review): Promise<Review> {
-    const reviews = this.getReviews();
-    reviews.unshift(review);
-    localStorage.setItem(REVIEWS_KEY, JSON.stringify(reviews));
+  static getReviews(): Review[] {
+    return SEED_REVIEWS;
+  }
 
+  static async addReviewAsync(review: Review): Promise<Review> {
     if (supabase) {
       try {
         await supabase.from('reviews').upsert(reviewToRow(review));
       } catch (error) {
-        console.error('[addReviewAsync] Supabase error:', error);
+        console.error('Supabase write error (review):', error);
       }
     }
 
-    // Recalculate vendor rating — update Supabase directly
-    const vendorReviews = reviews.filter((r) => r.vendorId === review.vendorId);
-    const avg = vendorReviews.reduce((sum, r) => sum + r.rating, 0) / vendorReviews.length;
-    if (supabase) {
-      try {
-        await supabase.from('vendors').update({
-          rating: parseFloat(avg.toFixed(1)),
-          review_count: vendorReviews.length,
-        }).eq('id', review.vendorId);
-      } catch (e) {
-        console.error('[addReviewAsync] Rating update error:', e);
-      }
+    const allReviews = await this.getReviewsAsync();
+    const vendorReviews = allReviews.filter((r) => r.vendorId === review.vendorId);
+    const avg = vendorReviews.reduce((sum, r) => sum + r.rating, 0) / (vendorReviews.length || 1);
+    const vendor = await this.getVendorByIdAsync(review.vendorId);
+    if (vendor) {
+      vendor.rating = parseFloat(avg.toFixed(1));
+      vendor.reviewCount = vendorReviews.length;
+      await this.updateVendorAsync(vendor);
     }
 
     return review;
@@ -962,36 +932,58 @@ export class StorageManager {
     return review;
   }
 
-  // ── Enquiries ─────────────────────────────────────────────────────────────
+  // --- ENQUIRIES ---
 
-  static getEnquiries(vendorIdOrSlug?: string): Enquiry[] {
+  static async getEnquiriesAsync(vendorIdOrSlug?: string): Promise<Enquiry[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return vendorIdOrSlug
+        ? SEED_ENQUIRIES.filter((e) => e.vendorId === vendorIdOrSlug)
+        : SEED_ENQUIRIES;
+    }
     try {
-      const data = localStorage.getItem(ENQUIRIES_KEY);
-      let all: Enquiry[] = data ? JSON.parse(data) : [];
-      if (all.length === 0) {
-        all = SEED_ENQUIRIES;
-        localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(SEED_ENQUIRIES));
+      const { data, error } = await supabase.from('enquiries').select('*');
+      if (error || !data || data.length === 0) {
+        if (!data || data.length === 0) {
+          for (const e of SEED_ENQUIRIES) {
+            await supabase.from('enquiries').upsert(enquiryToRow(e));
+          }
+        }
+        return vendorIdOrSlug
+          ? SEED_ENQUIRIES.filter((e) => e.vendorId === vendorIdOrSlug)
+          : SEED_ENQUIRIES;
       }
+      let all = data.map(rowToEnquiry);
       all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
       if (vendorIdOrSlug) {
-        return all.filter((e) => e.vendorId === vendorIdOrSlug);
+        const vendor = (await this.getVendorBySlugAsync(vendorIdOrSlug)) || (await this.getVendorByIdAsync(vendorIdOrSlug));
+        const matchIds = new Set(
+          [vendorIdOrSlug, vendor?.id, vendor?.slug, vendor?.whatsapp, vendor?.phone].filter(
+            (val): val is string => Boolean(val)
+          )
+        );
+        return all.filter((e) => matchIds.has(e.vendorId));
       }
       return all;
-    } catch {
+    } catch (e) {
+      console.error('getEnquiriesAsync error:', e);
       return SEED_ENQUIRIES;
     }
   }
 
-  static async addEnquiryAsync(enquiry: Enquiry): Promise<Enquiry> {
-    const enquiries = this.getEnquiries();
-    enquiries.unshift(enquiry);
-    localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(enquiries));
+  static getEnquiries(vendorIdOrSlug?: string): Enquiry[] {
+    if (vendorIdOrSlug) {
+      return SEED_ENQUIRIES.filter((e) => e.vendorId === vendorIdOrSlug);
+    }
+    return SEED_ENQUIRIES;
+  }
 
+  static async addEnquiryAsync(enquiry: Enquiry): Promise<Enquiry> {
     if (supabase) {
       try {
         await supabase.from('enquiries').upsert(enquiryToRow(enquiry));
       } catch (error) {
-        console.error('[addEnquiryAsync] Supabase error:', error);
+        console.error('Supabase write error (enquiry):', error);
       }
     }
     return enquiry;
@@ -1003,17 +995,11 @@ export class StorageManager {
   }
 
   static async markEnquiryReadAsync(id: string): Promise<void> {
-    const enquiries = this.getEnquiries();
-    const target    = enquiries.find((e) => e.id === id);
-    if (target) {
-      target.read = true;
-      localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(enquiries));
-      if (supabase) {
-        try {
-          await supabase.from('enquiries').update({ read: true, read_status: true }).eq('id', id);
-        } catch (error) {
-          console.error('[markEnquiryReadAsync] Supabase error:', error);
-        }
+    if (supabase) {
+      try {
+        await supabase.from('enquiries').update({ read: true, read_status: true }).eq('id', id);
+      } catch (error) {
+        console.error('Supabase update error (enquiry read):', error);
       }
     }
   }
@@ -1023,26 +1009,18 @@ export class StorageManager {
   }
 
   static async replyEnquiryAsync(id: string, replyText: string): Promise<Enquiry | null> {
-    const enquiries = this.getEnquiries();
-    const target    = enquiries.find((e) => e.id === id);
-    if (target) {
-      target.replyText  = replyText;
-      target.repliedAt  = new Date().toISOString();
-      target.read       = true;
-      localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(enquiries));
-      if (supabase) {
-        try {
-          await supabase.from('enquiries').update({
-            reply_text: replyText,
-            replied_at: target.repliedAt,
-            read: true,
-            read_status: true,
-          }).eq('id', id);
-        } catch (error) {
-          console.error('[replyEnquiryAsync] Supabase error:', error);
-        }
+    const repliedAt = new Date().toISOString();
+    if (supabase) {
+      try {
+        await supabase.from('enquiries').update({
+          reply_text: replyText,
+          replied_at: repliedAt,
+          read: true,
+          read_status: true,
+        }).eq('id', id);
+      } catch (error) {
+        console.error('Supabase update error (enquiry reply):', error);
       }
-      return target;
     }
     return null;
   }
@@ -1053,13 +1031,11 @@ export class StorageManager {
   }
 
   static async deleteEnquiryAsync(id: string): Promise<void> {
-    const enquiries = this.getEnquiries().filter((e) => e.id !== id);
-    localStorage.setItem(ENQUIRIES_KEY, JSON.stringify(enquiries));
     if (supabase) {
       try {
         await supabase.from('enquiries').delete().eq('id', id);
       } catch (error) {
-        console.error('[deleteEnquiryAsync] Supabase error:', error);
+        console.error('Supabase delete error (enquiry):', error);
       }
     }
   }
@@ -1068,29 +1044,46 @@ export class StorageManager {
     this.deleteEnquiryAsync(id);
   }
 
-  // ── Users ─────────────────────────────────────────────────────────────────
+  // --- USERS ---
 
-  static getCurrentUser(): User | null {
+  static async getCurrentUserAsync(): Promise<User | null> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return null;
+    }
     try {
-      const data = localStorage.getItem(CURRENT_USER_KEY);
-      return data ? JSON.parse(data) : null;
-    } catch {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return null;
+      const { data: uRow } = await supabase.from('users').select('*').eq('id', session.user.id).maybeSingle();
+      if (!uRow) return null;
+      return {
+        id: uRow.id,
+        name: uRow.name || session.user.email?.split('@')[0] || 'User',
+        email: uRow.email || session.user.email || '',
+        phone: uRow.phone || '',
+        role: uRow.role || 'shopper',
+        vendorId: uRow.vendor_id || uRow.vendorId,
+        emailVerified: uRow.email_verified ?? true,
+        area: uRow.area || 'Ikorodu',
+        savedAddresses: uRow.saved_addresses || uRow.savedAddresses || [],
+        createdAt: uRow.created_at || new Date().toISOString(),
+      };
+    } catch (e) {
+      console.error('getCurrentUserAsync exception:', e);
       return null;
     }
   }
 
+  static getCurrentUser(): User | null {
+    return null;
+  }
+
   static async setCurrentUserAsync(user: User | null): Promise<void> {
-    if (user) {
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-      if (supabase) {
-        try {
-          await supabase.from('users').upsert(userToRow(user));
-        } catch (error) {
-          console.error('[setCurrentUserAsync] Supabase error:', error);
-        }
+    if (user && supabase) {
+      try {
+        await supabase.from('users').upsert(userToRow(user));
+      } catch (error) {
+        console.error('Supabase write error (user):', error);
       }
-    } else {
-      localStorage.removeItem(CURRENT_USER_KEY);
     }
   }
 
@@ -1098,7 +1091,7 @@ export class StorageManager {
     this.setCurrentUserAsync(user);
   }
 
-  // ── Favourites ────────────────────────────────────────────────────────────
+  // --- FAVORITES (STAYS IN LOCALSTORAGE) ---
 
   static getFavorites(): string[] {
     try {
@@ -1111,58 +1104,92 @@ export class StorageManager {
 
   static toggleFavorite(vendorId: string): string[] {
     const favs = this.getFavorites();
-    const idx  = favs.indexOf(vendorId);
-    if (idx === -1) favs.push(vendorId);
-    else favs.splice(idx, 1);
+    const idx = favs.indexOf(vendorId);
+    if (idx === -1) {
+      favs.push(vendorId);
+    } else {
+      favs.splice(idx, 1);
+    }
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
     return favs;
   }
 
-  // ── Banners ───────────────────────────────────────────────────────────────
+  // --- BANNERS ---
 
-  static getBanners(): BannerAd[] {
+  static async getBannersAsync(): Promise<BannerAd[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return INITIAL_BANNER_ADS;
+    }
     try {
-      const data = localStorage.getItem(BANNERS_KEY);
-      if (!data) {
-        localStorage.setItem(BANNERS_KEY, JSON.stringify(INITIAL_BANNER_ADS));
+      const { data, error } = await supabase.from('banners').select('*');
+      if (error || !data || data.length === 0) {
+        if (!data || data.length === 0) {
+          for (const b of INITIAL_BANNER_ADS) {
+            await supabase.from('banners').upsert(b);
+          }
+        }
         return INITIAL_BANNER_ADS;
       }
-      return JSON.parse(data);
-    } catch {
+      return data;
+    } catch (e) {
+      console.error('getBannersAsync error:', e);
       return INITIAL_BANNER_ADS;
     }
   }
 
-  static saveBanners(banners: BannerAd[]): void {
-    localStorage.setItem(BANNERS_KEY, JSON.stringify(banners));
+  static getBanners(): BannerAd[] {
+    return INITIAL_BANNER_ADS;
   }
 
-  // ── Orders ────────────────────────────────────────────────────────────────
+  static saveBanners(banners: BannerAd[]): void {
+    if (supabase) {
+      (async () => {
+        for (const b of banners) {
+          try {
+            await supabase.from('banners').upsert(b);
+          } catch (e) {
+            console.error('saveBanners error:', e);
+          }
+        }
+      })();
+    }
+  }
 
-  static getOrders(userId?: string): Order[] {
+  // --- ORDERS ---
+
+  static async getOrdersAsync(userId?: string): Promise<Order[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return userId ? SEED_ORDERS.filter((o) => o.userId === userId) : SEED_ORDERS;
+    }
     try {
-      const data = localStorage.getItem(ORDERS_KEY);
-      if (!data) {
-        localStorage.setItem(ORDERS_KEY, JSON.stringify(SEED_ORDERS));
+      let query = supabase.from('orders').select('*');
+      if (userId) query = query.eq('user_id', userId);
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        if (!userId && (!data || data.length === 0)) {
+          for (const o of SEED_ORDERS) {
+            await supabase.from('orders').upsert(orderToRow(o));
+          }
+        }
         return userId ? SEED_ORDERS.filter((o) => o.userId === userId) : SEED_ORDERS;
       }
-      const all: Order[] = JSON.parse(data);
-      return userId ? all.filter((o) => o.userId === userId) : all;
-    } catch {
+      return data.map(rowToOrder);
+    } catch (e) {
+      console.error('getOrdersAsync error:', e);
       return SEED_ORDERS;
     }
   }
 
-  static async addOrderAsync(order: Order): Promise<Order> {
-    const orders = this.getOrders();
-    orders.unshift(order);
-    localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
+  static getOrders(userId?: string): Order[] {
+    return userId ? SEED_ORDERS.filter((o) => o.userId === userId) : SEED_ORDERS;
+  }
 
+  static async addOrderAsync(order: Order): Promise<Order> {
     if (supabase) {
       try {
         await supabase.from('orders').upsert(orderToRow(order));
       } catch (error) {
-        console.error('[addOrderAsync] Supabase error:', error);
+        console.error('Supabase write error (order):', error);
       }
     }
     return order;
@@ -1173,212 +1200,346 @@ export class StorageManager {
     return order;
   }
 
-  // ── Addresses ─────────────────────────────────────────────────────────────
-
   static getUserAddresses(user?: User | null): DeliveryAddress[] {
-    if (user?.savedAddresses && user.savedAddresses.length > 0) return user.savedAddresses;
+    if (user?.savedAddresses && user.savedAddresses.length > 0) {
+      return user.savedAddresses;
+    }
     return INITIAL_DELIVERY_ADDRESSES;
   }
 
   static async saveUserAddressesAsync(user: User, addresses: DeliveryAddress[]): Promise<User> {
-    const updatedUser: User = { ...user, savedAddresses: addresses };
-    this.setCurrentUser(updatedUser);
+    const updatedUser: User = {
+      ...user,
+      savedAddresses: addresses,
+    };
+    await this.setCurrentUserAsync(updatedUser);
     return updatedUser;
   }
 
-  // ── Analytics ─────────────────────────────────────────────────────────────
-
-  static incrementVendorTap(vendorId: string, type: 'profile' | 'whatsapp' | 'product'): void {
-    if (!vendorId || !supabase) return;
-    // Fire-and-forget: increment the appropriate analytics counter in Supabase
-    const field = type === 'profile'
-      ? 'analytics->profileViews'
-      : type === 'whatsapp'
-      ? 'analytics->whatsappTaps'
-      : 'analytics->productViews';
-    // Use a raw increment via RPC if available, otherwise skip (analytics are non-critical)
-    supabase.rpc('increment_vendor_analytics', { vendor_id: vendorId, field_name: type })
-      .catch(() => {
-        // Silently ignore if RPC doesn't exist yet
-      });
+  static async incrementVendorTapAsync(vendorId: string, type: 'profile' | 'whatsapp' | 'product'): Promise<void> {
+    if (!supabase || !isSupabaseConfigured()) return;
+    try {
+      const { data } = await supabase.from('vendors').select('*').eq('id', vendorId).maybeSingle();
+      if (!data) return;
+      const vendor = rowToVendor(data);
+      if (!vendor.analytics) {
+        vendor.analytics = { profileViews: 0, whatsappTaps: 0, productViews: 0, dailyViews: [] };
+      }
+      if (type === 'profile') vendor.analytics.profileViews = (vendor.analytics.profileViews || 0) + 1;
+      if (type === 'whatsapp') vendor.analytics.whatsappTaps = (vendor.analytics.whatsappTaps || 0) + 1;
+      if (type === 'product') vendor.analytics.productViews = (vendor.analytics.productViews || 0) + 1;
+      await supabase.from('vendors').update({ analytics: vendor.analytics }).eq('id', vendorId);
+    } catch (e) {
+      console.error('incrementVendorTapAsync error:', e);
+    }
   }
 
-  // ── Admin settings ─────────────────────────────────────────────────────────
+  static incrementVendorTap(vendorId: string, type: 'profile' | 'whatsapp' | 'product'): void {
+    this.incrementVendorTapAsync(vendorId, type);
+  }
 
-  static getSettings(): AdminSettings {
+  // --- ADMIN SETTINGS ---
+
+  static async getSettingsAsync(): Promise<AdminSettings> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return DEFAULT_ADMIN_SETTINGS;
+    }
     try {
-      try {
-        localStorage.removeItem('ikorodusquare_settings');
-        localStorage.removeItem('ikorodusquare_settings_v1');
-      } catch { /* ignore */ }
-
-      const data = localStorage.getItem(SETTINGS_KEY);
-      if (!data) {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(DEFAULT_ADMIN_SETTINGS));
+      const { data, error } = await supabase.from('settings').select('*').eq('id', 'platform_settings').maybeSingle();
+      if (error || !data) {
+        await supabase.from('settings').upsert({ id: 'platform_settings', ...DEFAULT_ADMIN_SETTINGS });
         return DEFAULT_ADMIN_SETTINGS;
       }
-      const settings = JSON.parse(data);
-
-      let needsMigration = false;
-      if (!settings.bankName || settings.bankName.includes('Moniepoint')) { settings.bankName = DEFAULT_ADMIN_SETTINGS.bankName; needsMigration = true; }
-      if (!settings.accountName || settings.accountName === 'IkoroduSquare') { settings.accountName = DEFAULT_ADMIN_SETTINGS.accountName; needsMigration = true; }
-      if (!settings.accountNumber || settings.accountNumber === '8123456789') { settings.accountNumber = DEFAULT_ADMIN_SETTINGS.accountNumber; needsMigration = true; }
-      if (!settings.whatsappSupportNumber || settings.whatsappSupportNumber === '2348031234567') { settings.whatsappSupportNumber = DEFAULT_ADMIN_SETTINGS.whatsappSupportNumber; needsMigration = true; }
-
-      if (needsMigration) localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      return settings;
-    } catch {
+      return {
+        bankName: data.bankName || DEFAULT_ADMIN_SETTINGS.bankName,
+        accountName: data.accountName || DEFAULT_ADMIN_SETTINGS.accountName,
+        accountNumber: data.accountNumber || DEFAULT_ADMIN_SETTINGS.accountNumber,
+        whatsappSupportNumber: data.whatsappSupportNumber || DEFAULT_ADMIN_SETTINGS.whatsappSupportNumber,
+      };
+    } catch (e) {
+      console.error('getSettingsAsync error:', e);
       return DEFAULT_ADMIN_SETTINGS;
     }
   }
 
+  static getSettings(): AdminSettings {
+    return DEFAULT_ADMIN_SETTINGS;
+  }
+
   static saveSettings(settings: AdminSettings): void {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     if (supabase) {
       try {
         supabase.from('settings').upsert({ id: 'platform_settings', ...settings });
       } catch (e) {
-        console.error('[saveSettings] Supabase error:', e);
+        console.error('Supabase settings save error:', e);
       }
     }
   }
 
-  // ── Promotions ────────────────────────────────────────────────────────────
+  // --- PROMOTION MANAGEMENT & AUTOMATED EXPIRY ---
 
-  static getPromotions(): Promotion[] {
+  static async getPromotionsAsync(): Promise<Promotion[]> {
+    if (!supabase || !isSupabaseConfigured()) {
+      return INITIAL_PROMOTIONS;
+    }
     try {
-      const data = localStorage.getItem(PROMOTIONS_KEY);
-      if (!data) {
-        localStorage.setItem(PROMOTIONS_KEY, JSON.stringify(INITIAL_PROMOTIONS));
+      const { data, error } = await supabase.from('promotions').select('*');
+      if (error || !data || data.length === 0) {
+        if (!data || data.length === 0) {
+          for (const p of INITIAL_PROMOTIONS) {
+            await supabase.from('promotions').upsert(p);
+          }
+        }
         return INITIAL_PROMOTIONS;
       }
-      return JSON.parse(data);
-    } catch {
+      return data;
+    } catch (e) {
+      console.error('getPromotionsAsync error:', e);
       return INITIAL_PROMOTIONS;
     }
   }
 
+  static getPromotions(): Promotion[] {
+    return INITIAL_PROMOTIONS;
+  }
+
   static savePromotions(promotions: Promotion[]): void {
-    localStorage.setItem(PROMOTIONS_KEY, JSON.stringify(promotions));
+    if (supabase) {
+      (async () => {
+        for (const p of promotions) {
+          try {
+            await supabase.from('promotions').upsert(p);
+          } catch (e) {
+            console.error('savePromotions error:', e);
+          }
+        }
+      })();
+    }
   }
 
   static createPromotionRequest(promo: Promotion): void {
-    const promotions    = this.getPromotions();
-    const existingIndex = promotions.findIndex((p) => p.id === promo.id);
-    if (existingIndex >= 0) promotions[existingIndex] = promo;
-    else promotions.unshift(promo);
-    this.savePromotions(promotions);
+    if (supabase) {
+      try {
+        supabase.from('promotions').upsert(promo);
+      } catch (e) {
+        console.error('Supabase write error (promotion request):', e);
+      }
+    }
+  }
+
+  static async activatePromotionAsync(promo: Promotion): Promise<void> {
+    const startDate = new Date().toISOString();
+    const expiryDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString();
+
+    const updatedPromo: Promotion = {
+      ...promo,
+      status: 'active',
+      startDate,
+      expiryDate,
+    };
+
+    const vendors = await this.getVendorsAsync();
+    const products = await this.getProductsAsync();
+
+    if (updatedPromo.promotionType === 'sponsored_vendor') {
+      const v = vendors.find((v) => v.id === updatedPromo.vendorId);
+      if (v) {
+        v.sponsoredCategorySlot = true;
+        v.isFeatured = true;
+        v.is_featured = true;
+        v.featuredOnHomepage = true;
+        await this.updateVendorAsync(v);
+      }
+    } else if (updatedPromo.promotionType === 'category_top_spot') {
+      const v = vendors.find((v) => v.id === updatedPromo.vendorId);
+      if (v) {
+        v.categoryTopSpot = true;
+        await this.updateVendorAsync(v);
+      }
+    } else if (updatedPromo.promotionType === 'featured_product' && updatedPromo.productId) {
+      const p = products.find((prod) => prod.id === updatedPromo.productId);
+      if (p) {
+        p.featured = true;
+        await this.updateProductAsync(p);
+      }
+    } else if (updatedPromo.promotionType === 'homepage_banner') {
+      const banners = await this.getBannersAsync();
+      const existingBanner = banners.find((b) => b.promotionId === updatedPromo.id);
+      if (!existingBanner) {
+        const v = vendors.find((v) => v.id === updatedPromo.vendorId);
+        const newBanner: BannerAd = {
+          id: 'banner-promo-' + Date.now(),
+          title: updatedPromo.bannerData?.title || `${updatedPromo.vendorName} — Special Store Spotlight`,
+          subtitle: updatedPromo.bannerData?.subtitle || `Top verified vendor in Ikorodu. Check out exclusive offers today.`,
+          imageURL: updatedPromo.bannerData?.imageURL || v?.logoURL || 'https://images.unsplash.com/photo-1593030761757-71fae45fa0e7?auto=format&fit=crop&w=1200&q=80',
+          ctaText: updatedPromo.bannerData?.ctaText || 'Visit Shop & Chat',
+          linkURL: `/store/${updatedPromo.vendorSlug || v?.slug || ''}`,
+          sponsorName: updatedPromo.vendorName,
+          badgeText: 'FEATURED SPONSOR',
+          promotionId: updatedPromo.id,
+        };
+        if (supabase) {
+          await supabase.from('banners').upsert(newBanner);
+        }
+      }
+    }
 
     if (supabase) {
-      try { supabase.from('promotions').upsert(promo); }
-      catch (e) { console.error('[createPromotionRequest] Supabase error:', e); }
+      try {
+        await supabase.from('promotions').upsert(updatedPromo);
+      } catch (e) {
+        console.error('Supabase write error (promotion):', e);
+      }
     }
   }
 
   static activatePromotion(promo: Promotion): void {
-    const promotions = this.getPromotions();
-    const existingIndex = promotions.findIndex((p) => p.id === promo.id);
+    this.activatePromotionAsync(promo);
+  }
 
-    const startDate  = new Date().toISOString();
-    const expiryDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString();
-    const updatedPromo: Promotion = { ...promo, status: 'active', startDate, expiryDate };
+  static async checkAndSyncPromotionExpiriesAsync(): Promise<void> {
+    const promotions = await this.getPromotionsAsync();
+    const now = Date.now();
 
-    if (existingIndex >= 0) promotions[existingIndex] = updatedPromo;
-    else promotions.unshift(updatedPromo);
-    this.savePromotions(promotions);
+    const vendors = await this.getVendorsAsync();
+    const products = await this.getProductsAsync();
 
-    // Update vendor featured flags directly in Supabase
-    if (supabase) {
-      if (updatedPromo.promotionType === 'sponsored_vendor') {
-        supabase.from('vendors').update({
-          is_featured: true,
-          sponsored_category_slot: true,
-        }).eq('id', updatedPromo.vendorId).catch(console.error);
-      } else if (updatedPromo.promotionType === 'category_top_spot') {
-        supabase.from('vendors').update({
-          category_top_spot: true,
-        }).eq('id', updatedPromo.vendorId).catch(console.error);
-      } else if (updatedPromo.promotionType === 'featured_product' && updatedPromo.productId) {
-        const products = this.getProducts();
-        const p = products.find((prod) => prod.id === updatedPromo.productId);
-        if (p) { p.featured = true; this.updateProduct(p); }
-      } else if (updatedPromo.promotionType === 'homepage_banner') {
-        const banners = this.getBanners();
-        if (!banners.find((b) => b.promotionId === updatedPromo.id)) {
-          const newBanner: BannerAd = {
-            id: 'banner-promo-' + Date.now(),
-            title: updatedPromo.bannerData?.title || `${updatedPromo.vendorName} — Special Store Spotlight`,
-            subtitle: updatedPromo.bannerData?.subtitle || 'Top verified vendor in Ikorodu.',
-            imageURL: updatedPromo.bannerData?.imageURL || 'https://images.unsplash.com/photo-1593030761757-71fae45fa0e7?auto=format&fit=crop&w=1200&q=80',
-            ctaText: updatedPromo.bannerData?.ctaText || 'Visit Shop & Chat',
-            linkURL: `/store/${updatedPromo.vendorSlug || ''}`,
-            sponsorName: updatedPromo.vendorName,
-            badgeText: 'FEATURED SPONSOR',
-            promotionId: updatedPromo.id,
-          };
-          banners.unshift(newBanner);
-          this.saveBanners(banners);
+    for (let i = 0; i < promotions.length; i++) {
+      const p = promotions[i];
+      if (p.status === 'active') {
+        const expiryTime = new Date(p.expiryDate).getTime();
+        if (now >= expiryTime) {
+          p.status = 'expired';
+
+          if (p.promotionType === 'sponsored_vendor') {
+            const hasOtherActive = promotions.some(
+              (other) => other.id !== p.id && other.vendorId === p.vendorId && other.promotionType === 'sponsored_vendor' && other.status === 'active'
+            );
+            if (!hasOtherActive) {
+              const v = vendors.find((v) => v.id === p.vendorId);
+              if (v) {
+                v.sponsoredCategorySlot = false;
+                v.isFeatured = false;
+                v.is_featured = false;
+                v.featuredOnHomepage = false;
+                await this.updateVendorAsync(v);
+              }
+            }
+          } else if (p.promotionType === 'category_top_spot') {
+            const hasOtherActive = promotions.some(
+              (other) => other.id !== p.id && other.vendorId === p.vendorId && other.promotionType === 'category_top_spot' && other.status === 'active'
+            );
+            if (!hasOtherActive) {
+              const v = vendors.find((v) => v.id === p.vendorId);
+              if (v) {
+                v.categoryTopSpot = false;
+                await this.updateVendorAsync(v);
+              }
+            }
+          } else if (p.promotionType === 'featured_product' && p.productId) {
+            const hasOtherActive = promotions.some(
+              (other) => other.id !== p.id && other.productId === p.productId && other.promotionType === 'featured_product' && other.status === 'active'
+            );
+            if (!hasOtherActive) {
+              const prod = products.find((pr) => pr.id === p.productId);
+              if (prod) {
+                prod.featured = false;
+                await this.updateProductAsync(prod);
+              }
+            }
+          } else if (p.promotionType === 'homepage_banner') {
+            if (supabase) {
+              await supabase.from('banners').delete().eq('promotion_id', p.id);
+            }
+          }
+
+          if (supabase) {
+            await supabase.from('promotions').upsert(p);
+          }
         }
       }
-
-      supabase.from('promotions').upsert(updatedPromo).catch(console.error);
     }
   }
 
   static checkAndSyncPromotionExpiries(): void {
-    const promotions = this.getPromotions();
-    const now        = Date.now();
-    let hasChanges   = false;
-    let banners      = this.getBanners();
-
-    for (let i = 0; i < promotions.length; i++) {
-      const p = promotions[i];
-      if (p.status === 'active' && new Date(p.expiryDate).getTime() <= now) {
-        p.status   = 'expired';
-        hasChanges = true;
-
-        if (p.promotionType === 'homepage_banner') {
-          banners = banners.filter((b) => b.promotionId !== p.id);
-          this.saveBanners(banners);
-        }
-
-        if (supabase) {
-          supabase.from('promotions').update({ status: 'expired' }).eq('id', p.id).catch(console.error);
-        }
-      }
-    }
-
-    if (hasChanges) this.savePromotions(promotions);
+    this.checkAndSyncPromotionExpiriesAsync();
   }
 
-  static updatePromotionStatus(id: string, newStatus: PromotionStatus, extendDays: number = 0): void {
-    const promotions = this.getPromotions();
-    const p          = promotions.find((item) => item.id === id);
+  static async updatePromotionStatusAsync(id: string, newStatus: PromotionStatus, extendDays: number = 0): Promise<void> {
+    const promotions = await this.getPromotionsAsync();
+    const p = promotions.find((item) => item.id === id);
     if (!p) return;
 
     p.status = newStatus;
     if (extendDays > 0) {
       const currentExpiry = new Date(p.expiryDate).getTime();
-      p.expiryDate = new Date(Math.max(currentExpiry, Date.now()) + extendDays * 86400 * 1000).toISOString();
+      const newExpiry = new Date(Math.max(currentExpiry, Date.now()) + extendDays * 86400 * 1000).toISOString();
+      p.expiryDate = newExpiry;
     }
+
     if (newStatus === 'active') {
-      p.startDate  = new Date().toISOString();
+      p.startDate = new Date().toISOString();
       p.expiryDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString();
-    }
-
-    this.savePromotions(promotions);
-
-    if (newStatus === 'active') {
-      this.activatePromotion(p);
+      await this.activatePromotionAsync(p);
     } else {
-      if (p.promotionType === 'homepage_banner') {
-        const banners = this.getBanners().filter((b) => b.promotionId !== p.id);
-        this.saveBanners(banners);
+      const vendors = await this.getVendorsAsync();
+      const products = await this.getProductsAsync();
+
+      if (p.promotionType === 'sponsored_vendor') {
+        const hasOtherActive = promotions.some(
+          (other) => other.id !== p.id && other.vendorId === p.vendorId && other.promotionType === 'sponsored_vendor' && other.status === 'active'
+        );
+        if (!hasOtherActive) {
+          const v = vendors.find((v) => v.id === p.vendorId);
+          if (v) {
+            v.sponsoredCategorySlot = false;
+            v.isFeatured = false;
+            v.is_featured = false;
+            v.featuredOnHomepage = false;
+            await this.updateVendorAsync(v);
+          }
+        }
+      } else if (p.promotionType === 'category_top_spot') {
+        const hasOtherActive = promotions.some(
+          (other) => other.id !== p.id && other.vendorId === p.vendorId && other.promotionType === 'category_top_spot' && other.status === 'active'
+        );
+        if (!hasOtherActive) {
+          const v = vendors.find((v) => v.id === p.vendorId);
+          if (v) {
+            v.categoryTopSpot = false;
+            await this.updateVendorAsync(v);
+          }
+        }
+      } else if (p.promotionType === 'featured_product' && p.productId) {
+        const hasOtherActive = promotions.some(
+          (other) => other.id !== p.id && other.productId === p.productId && other.promotionType === 'featured_product' && other.status === 'active'
+        );
+        if (!hasOtherActive) {
+          const prod = products.find((pr) => pr.id === p.productId);
+          if (prod) {
+            prod.featured = false;
+            await this.updateProductAsync(prod);
+          }
+        }
+      } else if (p.promotionType === 'homepage_banner') {
+        if (supabase) {
+          await supabase.from('banners').delete().eq('promotion_id', p.id);
+        }
       }
+
+      await this.checkAndSyncPromotionExpiriesAsync();
     }
 
     if (supabase) {
-      supabase.from('promotions').upsert(p).catch(console.error);
+      try {
+        await supabase.from('promotions').upsert(p);
+      } catch (e) {
+        console.error('Supabase update status error:', e);
+      }
     }
+  }
+
+  static updatePromotionStatus(id: string, newStatus: PromotionStatus, extendDays: number = 0): void {
+    this.updatePromotionStatusAsync(id, newStatus, extendDays);
   }
 }

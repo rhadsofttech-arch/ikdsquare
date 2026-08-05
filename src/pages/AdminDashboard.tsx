@@ -93,12 +93,13 @@ type PromoTypeId = typeof PROMO_TYPES[number]['id'];
 interface AssignPromoModalProps {
   vendor: Vendor;
   products: ReturnType<typeof useApp>['products'];
+  initialType?: PromoTypeId;
   onClose: () => void;
   onAssign: (promo: Partial<Promotion>) => void;
 }
 
-const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, onClose, onAssign }) => {
-  const [selectedType, setSelectedType] = useState<PromoTypeId>('featured_product');
+const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, initialType = 'featured_product', onClose, onAssign }) => {
+  const [selectedType, setSelectedType] = useState<PromoTypeId>(initialType);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [reference, setReference] = useState('');
   const [bannerTitle, setBannerTitle] = useState(`${vendor.businessName} — Special Offer`);
@@ -396,6 +397,24 @@ export const AdminDashboard: React.FC = () => {
   const [rejectReasonModal,   setRejectReasonModal]   = useState<string | null>(null);
   const [rejectReasonText,    setRejectReasonText]    = useState('');
   const [assignPromoVendorId, setAssignPromoVendorId] = useState<string | null>(null);
+  const [assignPromoInitialType, setAssignPromoInitialType] = useState<PromoTypeId>('featured_product');
+
+  const handleOpenAssignPromo = (vendorId: string, promoType: PromoTypeId) => {
+    setAssignPromoVendorId(vendorId);
+    setAssignPromoInitialType(promoType);
+  };
+
+  // Active promo map per vendor
+  const vendorActivePromos = useMemo(() => {
+    const activeMap: Record<string, Set<string>> = {};
+    for (const p of promotions || []) {
+      if (p.status === 'active' && p.vendorId) {
+        if (!activeMap[p.vendorId]) activeMap[p.vendorId] = new Set();
+        activeMap[p.vendorId].add(p.promotionType);
+      }
+    }
+    return activeMap;
+  }, [promotions]);
 
   // ── Derive live vendor objects from AppContext so modals/buttons are NEVER stale ──
   const selectedVendorForDetails = useMemo(
@@ -801,6 +820,12 @@ export const AdminDashboard: React.FC = () => {
                 const isVerified = Boolean(vendor.ninVerified || vendor.nin_verified);
                 const isFeatured = Boolean(vendor.isFeatured ?? vendor.is_featured ?? vendor.featuredOnHomepage);
 
+                const activeTypes           = vendorActivePromos[vendor.id] || new Set();
+                const hasActiveFeatProd     = activeTypes.has('featured_product');
+                const hasActiveSponsored    = activeTypes.has('sponsored_vendor');
+                const hasActiveCategorySpot = activeTypes.has('category_top_spot');
+                const hasActiveBanner       = activeTypes.has('homepage_banner');
+
                 return (
                   <div key={vendor.id} className="py-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3 hover:bg-slate-50/50 px-3 rounded-2xl transition border border-slate-100 mb-2 bg-white">
                     <div className="flex items-center gap-3 min-w-0">
@@ -877,14 +902,60 @@ export const AdminDashboard: React.FC = () => {
                         {isFeatured ? 'Featured' : 'Feature'}
                       </button>
 
-                      {/* Assign Paid Add-on */}
+                      {/* 1. Featured Product Button */}
                       <button
-                        onClick={() => setAssignPromoVendorId(vendor.id)}
-                        className="px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 bg-slate-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400"
-                        title="Assign a paid promotional add-on"
+                        onClick={() => handleOpenAssignPromo(vendor.id, 'featured_product')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
+                          hasActiveFeatProd
+                            ? 'bg-amber-500 text-slate-950 border-amber-500 hover:bg-amber-400'
+                            : 'bg-slate-50 text-amber-900 border-amber-200 hover:bg-amber-100 hover:border-amber-300'
+                        }`}
+                        title={hasActiveFeatProd ? 'Featured Product Active — Click to manage' : 'Assign Featured Product Slot'}
                       >
-                        <Zap className="w-3.5 h-3.5 text-emerald-600" />
-                        Add-on
+                        <Zap className={`w-3.5 h-3.5 ${hasActiveFeatProd ? 'text-slate-950 fill-slate-950' : 'text-amber-600'}`} />
+                        {hasActiveFeatProd ? 'Feat. Product ✓' : 'Featured Product'}
+                      </button>
+
+                      {/* 2. Sponsored Vendor Slot Button */}
+                      <button
+                        onClick={() => handleOpenAssignPromo(vendor.id, 'sponsored_vendor')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
+                          hasActiveSponsored
+                            ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
+                            : 'bg-slate-50 text-purple-900 border-purple-200 hover:bg-purple-100 hover:border-purple-300'
+                        }`}
+                        title={hasActiveSponsored ? 'Sponsored Vendor Active — Click to manage' : 'Assign Sponsored Vendor Slot'}
+                      >
+                        <Sparkles className={`w-3.5 h-3.5 ${hasActiveSponsored ? 'text-white' : 'text-purple-600'}`} />
+                        {hasActiveSponsored ? 'Sponsored Slot ✓' : 'Sponsored Vendor Slot'}
+                      </button>
+
+                      {/* 3. Category Top Spot Button */}
+                      <button
+                        onClick={() => handleOpenAssignPromo(vendor.id, 'category_top_spot')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
+                          hasActiveCategorySpot
+                            ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                            : 'bg-slate-50 text-blue-900 border-blue-200 hover:bg-blue-100 hover:border-blue-300'
+                        }`}
+                        title={hasActiveCategorySpot ? 'Category Top Spot Active — Click to manage' : 'Assign Category Top Spot'}
+                      >
+                        <Award className={`w-3.5 h-3.5 ${hasActiveCategorySpot ? 'text-white' : 'text-blue-600'}`} />
+                        {hasActiveCategorySpot ? 'Category Spot ✓' : 'Category Top Spot'}
+                      </button>
+
+                      {/* 4. Homepage Banner Slot Button */}
+                      <button
+                        onClick={() => handleOpenAssignPromo(vendor.id, 'homepage_banner')}
+                        className={`px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 ${
+                          hasActiveBanner
+                            ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                            : 'bg-slate-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300'
+                        }`}
+                        title={hasActiveBanner ? 'Homepage Banner Active — Click to manage' : 'Assign Homepage Banner Slot'}
+                      >
+                        <LayoutTemplate className={`w-3.5 h-3.5 ${hasActiveBanner ? 'text-white' : 'text-emerald-600'}`} />
+                        {hasActiveBanner ? 'Homepage Banner ✓' : 'Homepage Banner Slot'}
                       </button>
 
                       {/* View details */}
@@ -1448,12 +1519,33 @@ export const AdminDashboard: React.FC = () => {
                   <Star className="w-4 h-4" />
                   {selectedVendorForDetails.isFeatured || selectedVendorForDetails.is_featured || selectedVendorForDetails.featuredOnHomepage ? 'Featured ★' : 'Feature Vendor'}
                 </button>
-                {/* Assign Promotion from modal */}
+                {/* 1. Featured Product */}
                 <button
-                  onClick={() => { setAssignPromoVendorId(selectedVendorForDetails.id); setSelectedVendorId(null); }}
-                  className="font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
+                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'featured_product'); setSelectedVendorId(null); }}
+                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-amber-100 text-amber-900 hover:bg-amber-200"
                 >
-                  <Zap className="w-4 h-4 text-emerald-700" /> Assign Add-on
+                  <Zap className="w-3.5 h-3.5 text-amber-700" /> Feat. Product
+                </button>
+                {/* 2. Sponsored Vendor */}
+                <button
+                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'sponsored_vendor'); setSelectedVendorId(null); }}
+                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-purple-100 text-purple-900 hover:bg-purple-200"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-700" /> Sponsored
+                </button>
+                {/* 3. Category Top Spot */}
+                <button
+                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'category_top_spot'); setSelectedVendorId(null); }}
+                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-blue-100 text-blue-900 hover:bg-blue-200"
+                >
+                  <Award className="w-3.5 h-3.5 text-blue-700" /> Top Spot
+                </button>
+                {/* 4. Homepage Banner Slot */}
+                <button
+                  onClick={() => { handleOpenAssignPromo(selectedVendorForDetails.id, 'homepage_banner'); setSelectedVendorId(null); }}
+                  className="font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 transition cursor-pointer bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
+                >
+                  <LayoutTemplate className="w-3.5 h-3.5 text-emerald-700" /> Banner Slot
                 </button>
                 {/* Delete */}
                 <button
@@ -1479,6 +1571,7 @@ export const AdminDashboard: React.FC = () => {
         <AssignPromoModal
           vendor={assignPromoVendor}
           products={products}
+          initialType={assignPromoInitialType}
           onClose={() => setAssignPromoVendorId(null)}
           onAssign={handleAssignPromotion}
         />
