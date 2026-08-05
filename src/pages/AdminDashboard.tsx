@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { StorageManager } from '../data/mockStorage';
@@ -111,6 +110,7 @@ const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, o
   const promoConfig = PROMO_TYPES.find((t) => t.id === selectedType)!;
 
   const handleSubmit = () => {
+    const selectedProd = vendorProducts.find((p) => p.id === selectedProductId);
     const base: Partial<Promotion> = {
       id: `promo-admin-${Date.now()}`,
       vendorId: vendor.id,
@@ -125,7 +125,10 @@ const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, o
       expiryDate: new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
       paymentDate: new Date().toISOString(),
       createdAt: new Date().toISOString(),
-      ...(selectedType === 'featured_product' && { productId: selectedProductId }),
+      ...(selectedType === 'featured_product' && {
+        productId: selectedProductId,
+        productName: selectedProd?.name || '',
+      }),
       ...(selectedType === 'homepage_banner' && {
         bannerData: {
           title: bannerTitle,
@@ -217,7 +220,7 @@ const AssignPromoModal: React.FC<AssignPromoModalProps> = ({ vendor, products, o
                           : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
                       }`}
                     >
-                      <img src={prod.photoURL} alt={prod.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200" />
+                      <img src={prod.photoURL || prod.imageURL} alt={prod.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200" />
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-xs text-slate-900 truncate">{prod.name}</p>
                         <p className="text-[11px] text-emerald-700 font-extrabold">₦{prod.price.toLocaleString()}</p>
@@ -340,6 +343,8 @@ export const AdminDashboard: React.FC = () => {
     updateAdminSettings,
   } = useApp();
 
+  // ALL HOOKS DECLARED UNCONDITIONALLY AT THE TOP LEVEL BEFORE ANY EARLY RETURN
+
   // ── Promotion management state ────────────────────────────────────────────
   const [promoSearchQuery,  setPromoSearchQuery]  = useState('');
   const [promoStatusFilter, setPromoStatusFilter] = useState<'all' | 'pending_verification' | 'active' | 'expired' | 'rejected'>('all');
@@ -386,16 +391,13 @@ export const AdminDashboard: React.FC = () => {
   };
 
   // ── Vendor detail / delete / reject / assign-promo modal state ─────────────
-  const [selectedVendorId,   setSelectedVendorId]   = useState<string | null>(null);
-  const [vendorToDeleteId,   setVendorToDeleteId]   = useState<string | null>(null);
-  const [rejectReasonModal,  setRejectReasonModal]  = useState<string | null>(null);
-  const [rejectReasonText,   setRejectReasonText]   = useState('');
+  const [selectedVendorId,    setSelectedVendorId]    = useState<string | null>(null);
+  const [vendorToDeleteId,    setVendorToDeleteId]    = useState<string | null>(null);
+  const [rejectReasonModal,   setRejectReasonModal]   = useState<string | null>(null);
+  const [rejectReasonText,    setRejectReasonText]    = useState('');
   const [assignPromoVendorId, setAssignPromoVendorId] = useState<string | null>(null);
 
   // ── Derive live vendor objects from AppContext so modals/buttons are NEVER stale ──
-  // Instead of caching a snapshot (the old bug), we look up the current object
-  // from the live vendors array every render. Mutations via toggleVendorApproval etc.
-  // update vendors in AppContext which re-renders this component with fresh data.
   const selectedVendorForDetails = useMemo(
     () => vendors.find((v) => v.id === selectedVendorId) ?? null,
     [vendors, selectedVendorId]
@@ -443,6 +445,8 @@ export const AdminDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // ── ALL HOOKS COMPLETED ABOVE THIS LINE — EARLY RETURNS SAFELY BELOW ─────
+
   // ── Guards ────────────────────────────────────────────────────────────────
   if (isLoading) return <DashboardSkeleton />;
   if (!currentUser) return <AdminLoginPage />;
@@ -482,7 +486,6 @@ export const AdminDashboard: React.FC = () => {
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleApprove = async (vendorId: string) => {
     await approveVendor(vendorId);
-    // No stale-copy update needed — selectedVendorForDetails derives live from vendors[]
   };
 
   const handleConfirmReject = async () => {
@@ -512,6 +515,14 @@ export const AdminDashboard: React.FC = () => {
     } catch (e) {
       showToast('error', 'Assign Failed', 'Could not activate the promotion. Please try again.');
     }
+  };
+
+  // Delete product action for admin
+  const handleDeleteProductAdmin = async (productId: string) => {
+    if (!confirm('Are you sure you want to remove this product from the platform?')) return;
+    await StorageManager.deleteProductAsync(productId);
+    await refreshData();
+    showToast('info', 'Product Removed', 'The item has been deleted from the marketplace catalogue.');
   };
 
   return (
@@ -866,7 +877,7 @@ export const AdminDashboard: React.FC = () => {
                         {isFeatured ? 'Featured' : 'Feature'}
                       </button>
 
-                      {/* ── NEW: Assign Paid Add-on ── */}
+                      {/* Assign Paid Add-on */}
                       <button
                         onClick={() => setAssignPromoVendorId(vendor.id)}
                         className="px-2.5 py-1.5 rounded-xl border font-extrabold transition cursor-pointer flex items-center gap-1 bg-slate-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400"
@@ -946,14 +957,23 @@ export const AdminDashboard: React.FC = () => {
             {products.map((prod) => {
               const vendor = vendors.find((v) => v.id === prod.vendorId);
               return (
-                <div key={prod.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-start gap-3">
-                  <img src={prod.photoURL || prod.imageURL} alt={prod.name} className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
-                  <div className="flex-1 overflow-hidden space-y-1">
-                    <h4 className="font-extrabold text-sm text-slate-900 truncate">{prod.name}</h4>
-                    <p className="text-xs text-slate-500 truncate">{vendor?.businessName || 'Unknown Vendor'}</p>
-                    <p className="text-xs font-black text-emerald-700">₦{prod.price.toLocaleString()}</p>
-                    <span className="inline-block text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold">{prod.category}</span>
+                <div key={prod.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <img src={prod.photoURL || prod.imageURL} alt={prod.name} className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
+                    <div className="min-w-0 space-y-1">
+                      <h4 className="font-extrabold text-sm text-slate-900 truncate">{prod.name}</h4>
+                      <p className="text-xs text-slate-500 truncate">{vendor?.businessName || 'Unknown Vendor'}</p>
+                      <p className="text-xs font-black text-emerald-700">₦{prod.price.toLocaleString()}</p>
+                      <span className="inline-block text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold">{prod.category}</span>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleDeleteProductAdmin(prod.id)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer shrink-0"
+                    title="Delete Product"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               );
             })}
@@ -1201,6 +1221,9 @@ export const AdminDashboard: React.FC = () => {
                             <td className="py-3.5 px-3">
                               <p className="font-black text-slate-900">{promo.promotionName}</p>
                               <p className="text-[11px] text-slate-500 font-bold">🏢 {promo.vendorName}</p>
+                              {promo.productName && (
+                                <p className="text-[10px] text-emerald-700 font-semibold">📦 {promo.productName}</p>
+                              )}
                             </td>
                             <td className="py-3.5 px-3">
                               <span className="bg-slate-100 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded uppercase border border-slate-200">
